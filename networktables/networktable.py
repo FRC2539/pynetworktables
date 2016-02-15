@@ -9,7 +9,17 @@ from networktables2 import (
     SocketServerStreamProvider
 )
 
-__all__ = ["NetworkTable"]
+__all__ = ["NetworkTable", "ntproperty"]
+
+def ntproperty(key, defaultValue, writeDefault=True):
+    
+    ntvalue = NetworkTable.getGlobalAutoUpdateValue(key, defaultValue, writeDefault)
+    
+    def _get():
+        return ntvalue.value
+    
+    return property(fget=_get, fset=_set)
+
 
 class NetworkTableConnectionListenerAdapter:
     """An adapter that changes the source of a connection event
