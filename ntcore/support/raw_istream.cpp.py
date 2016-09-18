@@ -1,0 +1,22 @@
+'''----------------------------------------------------------------------------'''
+''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
+''' Open Source Software - may be modified and shared by FRC teams. The code   '''
+''' must be accompanied by the FIRST BSD license file in the root directory of '''
+''' the project.                                                               '''
+'''----------------------------------------------------------------------------'''
+
+#include "support/raw_istream.h"
+
+#include <cstring>
+
+using namespace wpi
+
+def read(self, data, len):
+    if len > m_left:
+        return False
+
+    std.memcpy(data, m_cur, len)
+    m_cur += len
+    m_left -= len
+    return True
+
