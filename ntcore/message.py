@@ -13,7 +13,8 @@
 
 #define kClearAllMagic 0xD06CB27Aul
 
-using namespace nt
+import logging
+logger = logging.getLogger('nt')
 
 std.shared_ptr<Message> Message.Read(WireDecoder& decoder,
                                        GetEntryTypeFunc get_entry_type)

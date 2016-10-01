@@ -1,166 +1,133 @@
-'''
-   TCPStream.h
 
-   TCPStream class definition. TCPStream provides methods to trasnfer
-   data between peers over a TCP/IP connection.
+import select
+import socket
 
-   ------------------------------------------
+class StreamEOF(IOError):
+    pass
 
-   Copyright 2013 [Vic Hargrave - http:#vichargrave.com]
+# From original pynet
+class ReadStream:
+    def __init__(self, f):
+        self.f = f
 
-   Licensed under the Apache License, 2.0 (the "License")
-   you may not use self file except in compliance with the License.
-   You may obtain a copy of the License at
+    def read(self, size=-1):
+        data = self.f.read(size)
+        if size is not None and size > 0 and len(data) != size:
+            raise StreamEOF("end of file")
+        return data
 
-       http:#www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-'''
-
-#include "tcpsockets/TCPStream.h"
-
-#ifdef _WIN32
-#include <WinSock2.h>
-#else:
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <unistd.h>
-#endif
-
-using namespace wpi
-
-TCPStream.TCPStream(int sd, address) : m_sd(sd)
-    char ip[50]
-#ifdef _WIN32
-    unsigned size = sizeof(ip) - 1
-    WSAAddressToString((sockaddr*)address, sockaddr_in, nullptr, ip, &size)
-#else:
-    inet_ntop(PF_INET, (in_addr*)&(address.sin_addr.s_addr), ip,
-              sizeof(ip) - 1)
-#endif
-    m_peerIP = ip
-    m_peerPort = ntohs(address.sin_port)
+    def readStruct(self, s):
+        data = self.f.read(s.size)
+        if len(data) != s.size:
+            raise StreamEOF("end of file")
+        return s.unpack(data)
 
 
-TCPStream.~TCPStream()
-    close()
 
+class TCPStream(object):
 
-def send(self, buffer, len, err):
-    if m_sd < 0:
-        *err = kConnectionClosed
-        return 0
-
-#ifdef _WIN32
-    WSABUF wsaBuf
-    wsaBuf.buf = const_cast<char*>(buffer)
-    wsaBuf.len = (ULONG)len
-    DWORD rv
-    result = True
-    while (WSASend(m_sd, &wsaBuf, 1, &rv, 0, nullptr, nullptr) == SOCKET_ERROR)
-        if WSAGetLastError() != WSAEWOULDBLOCK:
-            result = False
-            break
-
-        Sleep(1)
-
-    if not result:
-        char Buffer[128]
-#ifdef _MSC_VER
-        sprintf_s(Buffer, "Send() failed: WSA error=%d\n", WSAGetLastError())
-#else:
-        std.snprintf(Buffer, 128, "Send() failed: WSA error=%d\n", WSAGetLastError())
-#endif
-        OutputDebugStringA(Buffer)
-        *err = kConnectionReset
-        return 0
-
-#else:
-    rv = write(m_sd, buffer, len)
-    if rv < 0:
-        *err = kConnectionReset
-        return 0
-
-#endif
-    return static_cast<std.size_t>(rv)
-
-
-std.size_t TCPStream.receive(char* buffer, len, err,
-                               int timeout)
-    if m_sd < 0:
-        *err = kConnectionClosed
-        return 0
-
-#ifdef _WIN32
-    int rv
-#else:
-    ssize_t rv
-#endif
-    if timeout <= 0:
-#ifdef _WIN32
-        rv = recv(m_sd, buffer, len, 0)
-#else:
-        rv = read(m_sd, buffer, len)
-#endif
-
-    elif _waitForReadEvent(timeout):
-#ifdef _WIN32
-        rv = recv(m_sd, buffer, len, 0)
-#else:
-        rv = read(m_sd, buffer, len)
-#endif
-
-    else:
-        *err = kConnectionTimedOut
-        return 0
-
-    if rv < 0:
-        *err = kConnectionReset
-        return 0
-
-    return static_cast<std.size_t>(rv)
-
-
-def close(self):
-    if m_sd >= 0:
-#ifdef _WIN32
-        .shutdown(m_sd, SD_BOTH)
-        closesocket(m_sd)
-#else:
-        .shutdown(m_sd, SHUT_RDWR)
-        .close(m_sd)
-#endif
-
-    m_sd = -1
-
-
-def getPeerIP(self):
-    return m_peerIP
-
-
-def getPeerPort(self):
-    return m_peerPort
-
-
-def setNoDelay(self):
-    optval = 1
-    setsockopt(m_sd, IPPROTO_TCP, TCP_NODELAY, (char*)&optval, optval)
-
-
-def _waitForReadEvent(self, timeout):
-    fd_set sdset
-    struct timeval tv
-
-    tv.tv_sec = timeout
-    tv.tv_usec = 0
-    FD_ZERO(&sdset)
-    FD_SET(m_sd, &sdset)
-    if select(m_sd + 1, &sdset, NULL, NULL, &tv) > 0:
-        return True
-
-    return False
-
+    def __init__(self, sd, peer_ip, peer_port):
+        
+        self.m_sd = sd
+        self.m_peerIP = peer_ip
+        self.m_peerPort = peer_port
+    
+    def __del__(self):
+        self.close()    
+    
+    def send(self, buffer, len, err):
+        # TODO: change to return True/False (unless this gets changed to a stream
+        if self.m_sd < 0:
+            *err = kConnectionClosed
+            return False
+    
+    #ifdef _WIN32
+        WSABUF wsaBuf
+        wsaBuf.buf = const_cast<char*>(buffer)
+        wsaBuf.len = (ULONG)len
+        DWORD rv
+        result = True
+        while (WSASend(m_sd, &wsaBuf, 1, &rv, 0, nullptr, nullptr) == SOCKET_ERROR)
+            if WSAGetLastError() != WSAEWOULDBLOCK:
+                result = False
+                break
+    
+            Sleep(1)
+    
+        if not result:
+            char Buffer[128]
+    #ifdef _MSC_VER
+            sprintf_s(Buffer, "Send() failed: WSA error=%d\n", WSAGetLastError())
+    #else:
+            std.snprintf(Buffer, 128, "Send() failed: WSA error=%d\n", WSAGetLastError())
+    #endif
+            OutputDebugStringA(Buffer)
+            *err = kConnectionReset
+            return 0
+    
+    #else:
+        rv = write(m_sd, buffer, len)
+        if rv < 0:
+            *err = kConnectionReset
+            return 0
+    
+    #endif
+        return static_cast<std.size_t>(rv)
+    
+    
+    std.size_t TCPStream.receive(char* buffer, len, err,
+                                   int timeout)
+        if self.m_sd < 0:
+            *err = kConnectionClosed
+            return 0
+    
+    #ifdef _WIN32
+        int rv
+    #else:
+        ssize_t rv
+    #endif
+        if timeout <= 0:
+    #ifdef _WIN32
+            rv = recv(m_sd, buffer, len, 0)
+    #else:
+            rv = read(m_sd, buffer, len)
+    #endif
+    
+        elif _waitForReadEvent(timeout):
+    #ifdef _WIN32
+            rv = recv(m_sd, buffer, len, 0)
+    #else:
+            rv = read(m_sd, buffer, len)
+    #endif
+    
+        else:
+            *err = kConnectionTimedOut
+            return 0
+    
+        if rv < 0:
+            *err = kConnectionReset
+            return 0
+    
+        return static_cast<std.size_t>(rv)
+    
+    
+    def close(self):
+        if self.m_sd:
+            self.m_sd.shutdown(socket.SHUT_RDWR)
+            self.m_sd.close()
+        
+        self.m_sd = None
+    
+    
+    def getPeerIP(self):
+        return self.m_peerIP
+    
+    def getPeerPort(self):
+        return self.m_peerPort
+    
+    def setNoDelay(self):
+        self.m_sd.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    
+    def _waitForReadEvent(self, timeout):
+        r, _, _ = select.select((self.m_sd,),(),(), timeout)
+        return len(r) > 0

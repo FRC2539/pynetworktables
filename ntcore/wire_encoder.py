@@ -18,14 +18,14 @@
 using namespace nt
 
 WireEncoder.WireEncoder(unsigned int proto_rev)
-    m_proto_rev = proto_rev
-    m_error = nullptr
+    self.m_proto_rev = proto_rev
+    self.m_error = nullptr
 
 
 def writeDouble(self, val):
-    # The highest performance way to do self, non-portable.
+    # The highest performance way to do this, non-portable.
     v = llvm.DoubleToBits(val)
-    m_data.append(
+    self.m_data.append(
         (char)((v >> 56) & 0xff),
         (char)((v >> 48) & 0xff),
         (char)((v >> 40) & 0xff),
@@ -55,8 +55,8 @@ def writeType(self, type):
         ch = 0x02
         break
     case NT_RAW:
-        if m_proto_rev < 0x0300u:
-            m_error = "raw type not supported in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "raw type not supported in protocol < 3.0"
             return
 
         ch = 0x03
@@ -71,17 +71,17 @@ def writeType(self, type):
         ch = 0x12
         break
     case NT_RPC:
-        if m_proto_rev < 0x0300u:
-            m_error = "RPC type not supported in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "RPC type not supported in protocol < 3.0"
             return
 
         ch = 0x20
         break
     default:
-        m_error = "unrecognized type"
+        self.m_error = "unrecognized type"
         return
 
-    m_data.push_back(ch)
+    self.m_data.push_back(ch)
 
 
 def getValueSize(self, value):
@@ -93,12 +93,12 @@ def getValueSize(self, value):
     case NT_STRING:
         return getStringSize(value.GetString())
     case NT_RAW:
-        if m_proto_rev < 0x0300u:
+        if self.m_proto_rev < 0x0300u:
             return 0
 
         return getStringSize(value.GetRaw())
     case NT_RPC:
-        if m_proto_rev < 0x0300u:
+        if self.m_proto_rev < 0x0300u:
             return 0
 
         return getStringSize(value.GetRpc())
@@ -147,15 +147,15 @@ def writeValue(self, value):
         writeString(value.GetString())
         break
     case NT_RAW:
-        if m_proto_rev < 0x0300u:
-            m_error = "raw values not supported in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "raw values not supported in protocol < 3.0"
             return
 
         writeString(value.GetRaw())
         break
     case NT_RPC:
-        if m_proto_rev < 0x0300u:
-            m_error = "RPC values not supported in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "RPC values not supported in protocol < 3.0"
             return
 
         writeString(value.GetRpc())
@@ -200,13 +200,13 @@ def writeValue(self, value):
         break
 
     default:
-        m_error = "unrecognized type when writing value"
+        self.m_error = "unrecognized type when writing value"
         return
 
 
 
 def getStringSize(self, str):
-    if m_proto_rev < 0x0300u:
+    if self.m_proto_rev < 0x0300u:
         len = str.size()
         if len > 0xffff:
             len = 0xffff;    # Limited to 64K length; truncate
@@ -219,7 +219,7 @@ def getStringSize(self, str):
 def writeString(self, str):
     # length
     len = str.size()
-    if m_proto_rev < 0x0300u:
+    if self.m_proto_rev < 0x0300u:
         if len > 0xffff:
             len = 0xffff;    # Limited to 64K length; truncate
 
@@ -230,5 +230,5 @@ def writeString(self, str):
 
 
     # contents
-    m_data.append(str.data(), str.data() + len)
+    self.m_data.append(str.data(), str.data() + len)
 

@@ -9,6 +9,11 @@
 
 namespace nt
 
+  SequenceNumber& operator++()    ++m_value
+    if (m_value > 0xffff) m_value = 0
+    return *self
+
+
 bool operator<( SequenceNumber& lhs, rhs)
     if lhs.m_value < rhs.m_value:
         return (rhs.m_value - lhs.m_value) < (1u << 15)

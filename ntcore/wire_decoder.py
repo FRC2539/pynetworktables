@@ -46,13 +46,13 @@ static double ReadDouble( char*& buf)
 
 
 WireDecoder.WireDecoder(wpi.raw_istream& is, int proto_rev)
-    : m_is(is)
+    : self.m_is(is)
     # Start with a 1K temporary buffer.  Use malloc instead of so we can
     # realloc.
-    m_allocated = 1024
-    m_buf = static_cast<char*>(std.malloc(m_allocated))
-    m_proto_rev = proto_rev
-    m_error = nullptr
+    self.m_allocated = 1024
+    self.m_buf = static_cast<char*>(std.malloc(m_allocated))
+    self.m_proto_rev = proto_rev
+    self.m_error = nullptr
 
 
 WireDecoder.~WireDecoder()
@@ -70,15 +70,15 @@ def readDouble(self, val):
 
 def _realloc(self, len):
     # Double current buffer size until we have enough space.
-    if m_allocated >= len:
+    if self.m_allocated >= len:
         return
 
-    newlen = m_allocated * 2
+    newlen = self.m_allocated * 2
     while (newlen < len)
         newlen *= 2
 
-    m_buf = static_cast<char*>(std.realloc(m_buf, newlen))
-    m_allocated = newlen
+    self.m_buf = static_cast<char*>(std.realloc(m_buf, newlen))
+    self.m_allocated = newlen
 
 
 def readType(self, type):
@@ -114,7 +114,7 @@ def readType(self, type):
         break
     default:
         *type = NT_UNASSIGNED
-        m_error = "unrecognized value type"
+        self.m_error = "unrecognized value type"
         return False
 
     return True
@@ -144,8 +144,8 @@ def readValue(self, type):
         return Value.MakeString(std.move(v))
 
     case NT_RAW:
-        if m_proto_rev < 0x0300u:
-            m_error = "received raw value in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "received raw value in protocol < 3.0"
             return nullptr
 
         std.string v
@@ -155,8 +155,8 @@ def readValue(self, type):
         return Value.MakeRaw(std.move(v))
 
     case NT_RPC:
-        if m_proto_rev < 0x0300u:
-            m_error = "received RPC value in protocol < 3.0"
+        if self.m_proto_rev < 0x0300u:
+            self.m_error = "received RPC value in protocol < 3.0"
             return nullptr
 
         std.string v
@@ -218,14 +218,14 @@ def readValue(self, type):
         return Value.MakeStringArray(std.move(v))
 
     default:
-        m_error = "invalid type when trying to read value"
+        self.m_error = "invalid type when trying to read value"
         return nullptr
 
 
 
 def readString(self, str):
     size_t len
-    if m_proto_rev < 0x0300u:
+    if self.m_proto_rev < 0x0300u:
         unsigned int v
         if not read16(&v):
             return False

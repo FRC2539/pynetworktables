@@ -52,15 +52,90 @@ class NamedMessage(Message):
             raise BadMessageError(e)
         return name, rstream.readStruct(self.STRUCT)
 
+
+class NamedMessageEnd(Message):
+    def __init__(self, HEADER, STRUCT=None):
+        Message.__init__(self, HEADER, STRUCT)
+        
+    def getBytes(self, name, *args):
+        b = bytearray(self.HEADER)
+        if self.STRUCT is not None:
+            b.extend(self.STRUCT.pack(*args))
+        name = name.encode('utf-8')
+        b.extend(leb128.encode_uleb128(len(name)))
+        b.extend(name)
+        return b
+
+    def read(self, rstream):
+        s = rstream.readStruct(self.STRUCT)
+        nameLen = leb128.read_uleb128(rstream)
+        try:
+            name = rstream.read(nameLen).decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise BadMessageError(e)
+        return name, s
+
+
+'''
+kUnknown = -1,
+kKeepAlive = 0x00,
+kClientHello = 0x01,
+kProtoUnsup = 0x02,
+kServerHelloDone = 0x03,
+kServerHello = 0x04,
+kClientHelloDone = 0x05,
+kEntryAssign = 0x10,
+kEntryUpdate = 0x11,
+kFlagsUpdate = 0x12,
+kEntryDelete = 0x13,
+kClearEntries = 0x14,
+kExecuteRpc = 0x20,
+kRpcResponse = 0x21
+'''
+
 # A keep alive message that the client sends
-KEEP_ALIVE = Message(b'\x00')
+V2_KEEP_ALIVE = Message(b'\x00')
 # A client hello message that a client sends
-CLIENT_HELLO = Message(b'\x01', '>H')
+V2_CLIENT_HELLO = Message(b'\x01', '>H')
 # A protocol version unsupported message that the server sends to a client
-PROTOCOL_UNSUPPORTED = Message(b'\x02', '>H')
+V2_PROTOCOL_UNSUPPORTED = Message(b'\x02', '>H')
 # A server hello complete message that a server sends
-SERVER_HELLO_COMPLETE = Message(b'\x03')
+V2_SERVER_HELLO_COMPLETE = Message(b'\x03')
 # An entry assignment message
-ENTRY_ASSIGNMENT = NamedMessage(b'\x10', '>bHH')
+V2_ENTRY_ASSIGNMENT = NamedMessage(b'\x10', '>bHH')
 # A field update message
-FIELD_UPDATE = Message(b'\x11', '>HH')
+V2_FIELD_UPDATE = Message(b'\x11', '>HH')
+
+#
+# TODO: How to deal with reading things?
+#
+
+# A keep alive message that the client sends
+V3_KEEP_ALIVE = Message(b'\x00')
+# A client hello message that a client sends
+V3_CLIENT_HELLO = NamedMessageEnd(b'\x01', '>H')
+# A protocol version unsupported message that the server sends to a client
+V3_PROTOCOL_UNSUPPORTED = Message(b'\x02', '>H')
+# A server hello complete message that a server sends
+V3_SERVER_HELLO_COMPLETE = Message(b'\x03')
+V3_SERVER_HELLO = NamedMessageEnd(b'\x04', 'b')
+V3_CLIENT_HELLO_COMPLETE = Message(b'\x05')
+# An entry assignment message
+V3_ENTRY_ASSIGNMENT = NamedMessage(b'\x10', '>bHHb')
+# A field update message
+V3_FIELD_UPDATE = Message(b'\x11', '>HHb')
+V3_FLAGS_UPDATE = Message(b'\x12', '>Hb')
+V3_ENTRY_DELETE = Message(b'\x13', '>H')
+V3_CLEAR_ENTRIES = Message(b'\x14', '>I')
+V3_EXECUTE_RPC = NamedMessageEnd(b'\x20', '>HH')
+V3_RPC_RESPONSE = NamedMessageEnd(b'\x21', '>HH')
+
+
+#
+# Build two dictionaries -- one for v2, one for v3
+#
+
+
+# Maybe what we do instead is define a single message class, which has 
+# statics for v2 and v3... then we don't need these overloads
+

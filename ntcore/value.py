@@ -12,33 +12,33 @@
 using namespace nt
 
 Value.Value()
-    m_val.type = NT_UNASSIGNED
-    m_val.last_change = wpi.Now()
+    self.m_val.type = NT_UNASSIGNED
+    self.m_val.last_change = wpi.Now()
 
 
 Value.Value(NT_Type type,  private_init&)
-    m_val.type = type
-    m_val.last_change = wpi.Now()
-    if m_val.type == NT_BOOLEAN_ARRAY:
-        m_val.data.arr_boolean.arr = nullptr
+    self.m_val.type = type
+    self.m_val.last_change = wpi.Now()
+    if self.m_val.type == NT_BOOLEAN_ARRAY:
+        self.m_val.data.arr_boolean.arr = nullptr
 
-    elif m_val.type == NT_DOUBLE_ARRAY:
-        m_val.data.arr_double.arr = nullptr
+    elif self.m_val.type == NT_DOUBLE_ARRAY:
+        self.m_val.data.arr_double.arr = nullptr
 
-    elif m_val.type == NT_STRING_ARRAY:
-        m_val.data.arr_string.arr = nullptr
+    elif self.m_val.type == NT_STRING_ARRAY:
+        self.m_val.data.arr_string.arr = nullptr
 
 
 
 Value.~Value()
-    if m_val.type == NT_BOOLEAN_ARRAY:
-        delete[] m_val.data.arr_boolean.arr
+    if self.m_val.type == NT_BOOLEAN_ARRAY:
+        delete[] self.m_val.data.arr_boolean.arr
 
-    elif m_val.type == NT_DOUBLE_ARRAY:
-        delete[] m_val.data.arr_double.arr
+    elif self.m_val.type == NT_DOUBLE_ARRAY:
+        delete[] self.m_val.data.arr_double.arr
 
-    elif m_val.type == NT_STRING_ARRAY:
-        delete[] m_val.data.arr_string.arr
+    elif self.m_val.type == NT_STRING_ARRAY:
+        delete[] self.m_val.data.arr_string.arr
 
 
 

@@ -47,4 +47,5 @@ setup(
     url='https://github.com/robotpy/pynetworktables',
     keywords='frc first robotics wpilib networktables',
     packages=[base_package, 'networktables2'],
+    install_requires=['monotonic'],
     )
