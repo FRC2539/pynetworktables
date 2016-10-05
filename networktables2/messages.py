@@ -10,7 +10,44 @@ __all__ = ["BadMessageError", "PROTOCOL_REVISION",
 class BadMessageError(IOError):
     pass
 
+
+class MessageTypes(object):
+    kKeepAlive = b'\x00'
+    kClientHello = b'\x01'
+    kProtoUnsup = b'\x02'
+    kServerHelloDone = b'\x03'
+    kServerHello = b'\x04'
+    kClientHelloDone = b'\x05'
+    kEntryAssign = b'\x10'
+    kEntryUpdate = b'\x11'
+    kFlagsUpdate = b'\x12'
+    kEntryDelete = b'\x13'
+    kClearEntries = b'\x14'
+    kExecuteRpc = b'\x20'
+    kRpcResponse = b'\x21'
+    
+
+
 PROTOCOL_REVISION = 0x0200
+
+def getStringV2(rstream):
+    pass
+
+    # read 16 bits
+    # read n bytes
+
+def getStringV3(rstream):
+    pass
+
+    # read uleb
+    # read n bytes
+
+# Value storage is decoupled from value decoding/encoding
+# .. which is different than now
+
+# Message encoding/decoding must be directly coupled
+# otherwise it's inefficient
+
 
 class Message:
     def __init__(self, HEADER, STRUCT=None):
@@ -76,6 +113,12 @@ class NamedMessageEnd(Message):
         return name, s
 
 
+bool_fmt = '?'
+number_fmt = '>d'
+# no string format
+# no raw format
+
+
 '''
 kUnknown = -1,
 kKeepAlive = 0x00,
@@ -93,42 +136,13 @@ kExecuteRpc = 0x20,
 kRpcResponse = 0x21
 '''
 
-# A keep alive message that the client sends
-V2_KEEP_ALIVE = Message(b'\x00')
-# A client hello message that a client sends
-V2_CLIENT_HELLO = Message(b'\x01', '>H')
-# A protocol version unsupported message that the server sends to a client
-V2_PROTOCOL_UNSUPPORTED = Message(b'\x02', '>H')
-# A server hello complete message that a server sends
-V2_SERVER_HELLO_COMPLETE = Message(b'\x03')
-# An entry assignment message
-V2_ENTRY_ASSIGNMENT = NamedMessage(b'\x10', '>bHH')
-# A field update message
-V2_FIELD_UPDATE = Message(b'\x11', '>HH')
+
 
 #
 # TODO: How to deal with reading things?
 #
 
-# A keep alive message that the client sends
-V3_KEEP_ALIVE = Message(b'\x00')
-# A client hello message that a client sends
-V3_CLIENT_HELLO = NamedMessageEnd(b'\x01', '>H')
-# A protocol version unsupported message that the server sends to a client
-V3_PROTOCOL_UNSUPPORTED = Message(b'\x02', '>H')
-# A server hello complete message that a server sends
-V3_SERVER_HELLO_COMPLETE = Message(b'\x03')
-V3_SERVER_HELLO = NamedMessageEnd(b'\x04', 'b')
-V3_CLIENT_HELLO_COMPLETE = Message(b'\x05')
-# An entry assignment message
-V3_ENTRY_ASSIGNMENT = NamedMessage(b'\x10', '>bHHb')
-# A field update message
-V3_FIELD_UPDATE = Message(b'\x11', '>HHb')
-V3_FLAGS_UPDATE = Message(b'\x12', '>Hb')
-V3_ENTRY_DELETE = Message(b'\x13', '>H')
-V3_CLEAR_ENTRIES = Message(b'\x14', '>I')
-V3_EXECUTE_RPC = NamedMessageEnd(b'\x20', '>HH')
-V3_RPC_RESPONSE = NamedMessageEnd(b'\x21', '>HH')
+
 
 
 #

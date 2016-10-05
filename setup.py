@@ -46,6 +46,6 @@ setup(
     author_email='robotpy@googlegroups.com',
     url='https://github.com/robotpy/pynetworktables',
     keywords='frc first robotics wpilib networktables',
-    packages=[base_package, 'networktables2'],
+    packages=[base_package, 'networktables2', 'ntcore'],
     install_requires=['monotonic'],
     )

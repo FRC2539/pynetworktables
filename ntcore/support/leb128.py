@@ -18,7 +18,7 @@ def size_uleb128(value):
     return count
 
 def encode_uleb128(value):
-    out = []
+    out = bytearray()
     while True:
         byte = value & 0x7F
         value >>= 7
@@ -27,7 +27,7 @@ def encode_uleb128(value):
         out.append(byte)
         if value == 0:
             break
-    return bytes(bytearray(out))
+    return out
 
 # You can do bitwise operations on bytes, not so with strings (py2)
 if sys.version_info[0] == 2:

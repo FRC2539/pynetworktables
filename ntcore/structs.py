@@ -2,15 +2,15 @@
 from collections import namedtuple
 
 # data types
-NT_UNASSIGNED = 0
-NT_BOOLEAN = 0x01
-NT_DOUBLE = 0x02
-NT_STRING = 0x04
-NT_RAW = 0x08
-NT_BOOLEAN_ARRAY = 0x10
-NT_DOUBLE_ARRAY = 0x20
-NT_STRING_ARRAY = 0x40
-NT_RPC = 0x80
+NT_UNASSIGNED = b'\x00'
+NT_BOOLEAN = b'\x01'
+NT_DOUBLE = b'\x02'
+NT_STRING = b'\x04'
+NT_RAW = b'\x08'
+NT_BOOLEAN_ARRAY = b'\x10'
+NT_DOUBLE_ARRAY = b'\x20'
+NT_STRING_ARRAY = b'\x40'
+NT_RPC = b'\x80'
 
 # NetworkTables notifier kinds.
 NT_NOTIFY_NONE = 0

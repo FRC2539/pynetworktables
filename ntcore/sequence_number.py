@@ -7,35 +7,42 @@
 
 #include "SequenceNumber.h"
 
-namespace nt
-
-  SequenceNumber& operator++()    ++m_value
-    if (m_value > 0xffff) m_value = 0
-    return *self
 
 
-bool operator<( SequenceNumber& lhs, rhs)
-    if lhs.m_value < rhs.m_value:
-        return (rhs.m_value - lhs.m_value) < (1u << 15)
 
-    elif lhs.m_value > rhs.m_value:
-        return (lhs.m_value - rhs.m_value) > (1u << 15)
+def lt(l, r):
+    if l < r:
+        return (r - l) < (1 << 15)
+
+    elif l > r:
+        return (l - r) > (1 << 15)
 
     else:
         return False
 
 
 
-bool operator>( SequenceNumber& lhs, rhs)
-    if lhs.m_value < rhs.m_value:
-        return (rhs.m_value - lhs.m_value) > (1u << 15)
 
-    elif lhs.m_value > rhs.m_value:
-        return (lhs.m_value - rhs.m_value) < (1u << 15)
+
+def gt(l, r):
+    if l < r:
+        return (r - l) > (1 << 15)
+
+    elif l > r:
+        return (l - r) < (1 << 15)
 
     else:
         return False
 
 
+def cmp(l, r):
+    print("L: %5d; R: %5d, LT: %5s: GT: %5s" % (
+          l, r, lt(l, r), gt(l, r)))
 
-}  # namespace nt
+
+cmp(5, 10)
+cmp(10, 5)
+print()
+
+cmp(5, 40000)
+cmp(40000, 5)
