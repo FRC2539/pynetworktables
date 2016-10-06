@@ -16,15 +16,35 @@
     
 '''
 
-import array
 import struct
 
-#from .structs import 
+from .structs import (
+    NT_BOOLEAN,
+    NT_DOUBLE,
+    NT_STRING,
+    NT_RAW,
+    NT_BOOLEAN_ARRAY,
+    NT_DOUBLE_ARRAY,
+    NT_STRING_ARRAY,
+    NT_RPC,
+)
+ 
 from .support import leb128
-from ntcore.structs import NT_BOOLEAN_ARRAY, NT_STRING_ARRAY
 
-bool_fmt = 'b?'
-number_fmt = '>bd'
+kKeepAlive =        b'\x00'
+kClientHello =      b'\x01'
+kProtoUnsup =       b'\x02'
+kServerHelloDone =  b'\x03'
+kServerHello =      b'\x04'
+kClientHelloDone =  b'\x05'
+kEntryAssign =      b'\x10'
+kEntryUpdate =      b'\x11'
+kFlagsUpdate =      b'\x12'
+kEntryDelete =      b'\x13'
+kClearEntries =     b'\x14'
+kExecuteRpc =       b'\x20'
+kRpcResponse =      b'\x21'
+
 
 _bool_fmt = struct.Struct('?')
 _double_fmt = struct.Struct('>d')
@@ -105,21 +125,17 @@ def write_value_v3(v, out):
 
 
 class EmptyWireMessage(object):
-    
-    def __init__(self, HEADER):
-        self.HEADER = HEADER
         
     def write(self, msg, out):
         out.append(self.HEADER)
     
-    #def read(self):
-    #    pass
+    def read(self):
+        pass
     
     
 class WireMessage(object):
     
-    def __init__(self, HEADER, STRUCT):
-        self.HEADER = HEADER
+    def __init__(self, STRUCT):
         self.STRUCT = struct.Struct(STRUCT)
 
     def write(self, msg, out):
@@ -128,8 +144,7 @@ class WireMessage(object):
 
 class WireMessageWithStringV3(object):
     
-    def __init__(self, HEADER, STRUCT):
-        self.HEADER = HEADER
+    def __init__(self, STRUCT):
         self.STRUCT = struct.Struct(STRUCT)
 
     def write(self, msg, out):
@@ -145,31 +160,45 @@ class WireEntryAssignV3(object):
     pass
 
 
-
-V2_KEEP_ALIVE =             EmptyWireMessage(b'\x00')
-V2_CLIENT_HELLO =           WireMessage(b'\x01', '>H')
-V2_PROTOCOL_UNSUPPORTED =   WireMessage(b'\x02', '>H')
-V2_SERVER_HELLO_COMPLETE =  EmptyWireMessage(b'\x03')
-V2_ENTRY_ASSIGNMENT =       WireEntryAssignV2(b'\x10', '>bHH')
-V2_FIELD_UPDATE =           WireMessage(b'\x11', '>HH')
+class WireEntryUpdateV2(object):
+    pass
+class WireEntryUpdateV3(object):
+    pass
 
 
-V3_KEEP_ALIVE =             EmptyWireMessage(b'\x00')
-V3_CLIENT_HELLO =           WireMessageWithStringV3(b'\x01', '>H')
-V3_PROTOCOL_UNSUPPORTED =   WireMessage(b'\x02', '>H')
-V3_SERVER_HELLO_COMPLETE =  EmptyWireMessage(b'\x03')
-V3_SERVER_HELLO =           WireMessageWithStringV3(b'\x04', 'b')
-V3_CLIENT_HELLO_COMPLETE =  EmptyWireMessage(b'\x05')
-V3_ENTRY_ASSIGNMENT =       WireEntryAssignV3(b'\x10', '>bHHb')
-V3_FIELD_UPDATE =           WireMessage(b'\x11', '>HHb')
-V3_FLAGS_UPDATE =           WireMessage(b'\x12', '>Hb')
-V3_ENTRY_DELETE =           WireMessage(b'\x13', '>H')
-V3_CLEAR_ENTRIES =          WireMessage(b'\x14', '>I')
-V3_EXECUTE_RPC =            WireMessageWithStringV3(b'\x20', '>HH')
-V3_RPC_RESPONSE =           WireMessageWithStringV3(b'\x21', '>HH')
+V2_MAPPING = {
+    kKeepAlive:       EmptyWireMessage(),
+    kClientHello:     WireMessage('>H'),
+    kProtoUnsup:      WireMessage('>H'),
+    kServerHelloDone: EmptyWireMessage(),
+    kServerHello:     WireEntryAssignV2('>bHH'),
+    kEntryUpdate:     WireEntryUpdateV2('>HH'),
+}
+
+V3_MAPPING = {
+    kKeepAlive:       EmptyWireMessage(),
+    kClientHello:     WireMessageWithStringV3('>H'),
+    kProtoUnsup:      WireMessage('>H'),
+    kServerHelloDone: EmptyWireMessage(),
+    kServerHello:     WireMessageWithStringV3('b'),
+    kClientHelloDone: EmptyWireMessage(),
+    kEntryAssign:     WireEntryAssignV3('>bHHb'),
+    kEntryUpdate:     WireEntryUpdateV3('>HHb'),
+    kFlagsUpdate:     WireMessage('>Hb'),
+    kEntryDelete:     WireMessage('>H'),
+    kClearEntries:    WireMessage('>I'),
+    kExecuteRpc:      WireMessageWithStringV3('>HH'),
+    kRpcResponse:     WireMessageWithStringV3('>HH'),
+}
+
+# fixup the headers
+
+for k,v in V2_MAPPING.items():
+    v.HEADER = k
+
+for k,v in V3_MAPPING.items():
+    v.HEADER = k
+    
 
 
 
-
-V2_MAPPING = {}
-V3_MAPPING = {}
