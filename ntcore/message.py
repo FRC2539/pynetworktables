@@ -1,31 +1,4 @@
-'''
-    Messages are stored separately from the wire format
-    in order to support both protocol versions.
-    
-    This is a bit different from the C++ ntcore, as we have to decode
-    the wire format a little bit differently anyways
-'''
 
-
-# .. but when the message is created, we don't know the protocol
-#    to serialize to, so we have to keep it until we know
-
-# Maybe we have a writeV2() and writeV3() function?
-
-# Ok, just keep accumulating bytes, and join at the end
-
-# Because of their differences, it's easier to define different 
-# structs for each?
-
-    #// Message data.  Use varies by message type.
-    # MsgType type
-    #std::string m_str;
-    #std::shared_ptr<Value> m_value;
-    #unsigned int m_id;  // also used for proto_rev
-    #unsigned int m_flags;
-    #unsigned int m_seq_num_uid;
-
-# Need a base set that is guaranteed for each message type
 from collections import namedtuple
 
 from .constants import (
@@ -41,215 +14,216 @@ from .constants import (
     kEntryDelete,
     kClearEntries,
     kExecuteRpc,
-    kRpcResponse
+    kRpcResponse,
+    
+    kClearAllMagic
 )
 
+_empty_msgtypes = [kKeepAlive, kServerHelloDone, kClientHelloDone]
 
 
-# The problem is that in this case then the generic pack stuff doesn't work
-# as not everything has the right stuff
 MessageType = namedtuple('MessageType', ['type', 'str', 'value',
                                          'id', 'flags', 'seq_num_uid'])
 
-#EmptyMessage = namedtuple('EmptyMessage', ['type'])
-
-# .. when I receive this, I need to know the rev
-# .. when I create it, the rev needs to be set by someone else
-#ClientHelloMessage = namedtuple('ClientHelloMessage', ['type', 'identity', 'proto_rev'])
-#ServerHelloMessage = namedtuple('ServerHelloMessage', ['type', 'identity', 'proto_rev'])
-
-#AssignMessage = namedtuple('AssignMessage', ['type', 'name', 'value', 'id', 'seq_num_uid', 'flags'])
-#UpdateMessage = namedtuple('UpdateMessage', ['type', 'value', 'id', 'seq_num_uid'])
-
-#FlagsMessage = namedtuple('FlagsMessage', ['type', 'id', 'flags'])
-#DeleteMessage = namedtuple('DeleteMessage', ['type', 'id'])
-
-#RpcResponseMessage = namedtuple('RpcResponseMessage', ['type', 'value', 'id', 'call_uid'])
-
 class Message(object):
     
-    # in ntcore, the encoder is the only one who knows about
-    # the protocol version currently in use
+    @staticmethod
+    def keepAlive():
+        return MessageType(kKeepAlive, None, None, None, None, None)
     
     @staticmethod
     def clientHello(proto_rev, identity):
-        return ClientHelloMessage(kClientHello, identity, proto_rev)
+        return MessageType(kClientHello, identity, None, proto_rev, None, None)
     
     @staticmethod
-    def serverHello(flags, identity):
-        return ServerHelloMessage(kServerHello, identity, flags)
+    def protoUnsup(proto_rev):
+        return MessageType(kProtoUnsup, None, None, proto_rev, None, None)
     
     @staticmethod
     def serverHelloDone():
-        return EmptyMessage(kServerHelloDone)
+        return MessageType(kServerHelloDone, None, None, None, None, None)
+    
+    @staticmethod
+    def serverHello(flags, identity):
+        return MessageType(kServerHello, identity, None, None, flags, None)
     
     @staticmethod
     def clientHelloDone():
-        return EmptyMessage(kClientHelloDone)
+        return MessageType(kClientHelloDone, None, None, None, None, None)
     
     @staticmethod
     def entryAssign(name, msg_id, seq_num_uid, value, flags):
-        return AssignMessage(kEntryAssign, name, msg_id, value, seq_num_uid, flags)
+        return MessageType(kEntryAssign, name, value, msg_id, flags, seq_num_uid)
     
     @staticmethod
     def entryUpdate(entry_id, seq_num_uid, value):
-        return UpdateMessage(kEntryUpdate, value, entry_id, seq_num_uid)
+        return MessageType(kEntryUpdate, None, value, entry_id, None, seq_num_uid)
+    
+    @staticmethod
+    def flagsUpdate(msg_id, flags):
+        return MessageType(kFlagsUpdate, None, None, msg_id, flags, None)
     
     @staticmethod
     def entryDelete(entry_id):
-        return DeleteMessage(kEntryDelete, entry_id)
-
-    @staticmethod
-    def flagsUpdate(msg_id, flags):
-        return FlagsMessage(kFlagsUpdate, msg_id, flags)
+        return MessageType(kEntryDelete, None, None, entry_id, None, None)
     
     @staticmethod
+    def clearEntries():
+        return MessageType(kClearEntries, None, None, kClearAllMagic, None, None)
+    
+    @staticmethod
+    def executeRpc(rpc_id, call_uid, params):
+        return MessageType(kExecuteRpc, params, None, rpc_id, None, call_uid)
+
+    @staticmethod
     def rpcResponse(rpc_id, call_uid, result):
-        return RpcResponseMessage(kRpcResponse, result, rpc_id, call_uid)
+        return MessageType(kRpcResponse, result, None, rpc_id, None, call_uid)
+
+    
 
     @staticmethod
     def read(rstream, codec, get_entry_type):
         msgtype = rstream.read(1)
         
+        msg_str = None
+        value = None
+        msg_id = None
+        flags = None
+        seq_num_uid = None
+        
         # switch type
-        if msgtype == kKeepAlive:
-            return EmptyMessage(msgtype)
+        if msgtype in _empty_msgtypes:
+            pass
         
         elif msgtype == kClientHello:
-            proto_rev, = rstream.readStruct(codec.clientHello)
-            
-            identity = None
-            if proto_rev >= 0x0300:
-                identity = codec.read_string_v3(rstream)
-                
-            return ClientHelloMessage(msgtype, identity, proto_rev)
+            msg_id, = rstream.readStruct(codec.clientHello)
+            if msg_id >= 0x0300:
+                msg_str = codec.read_string_v3(rstream)
         
         elif msgtype == kProtoUnsup:
-            proto_rev, = rstream.readStruct(codec.protoUnsup)
-            return ProtoMessage(kProtoUnsup, proto_rev)
-        
-        elif msgtype == kServerHelloDone:
-            return EmptyMessage(msgtype)
+            msg_id, = rstream.readStruct(codec.protoUnsup)
         
         elif msgtype == kServerHello:
-            # nt3 only
-            try:
-                flags, str = rstream.readStruct(codec.serverHello)
-            except AttributeError:
-                raise # TODO: better error message
-        
+            flags, = rstream.readStruct(codec.serverHello)
+            msg_str = codec.read_string(rstream)
+           
         elif msgtype == kEntryAssign:
-            pass
+            msg_str = codec.read_string(rstream)
+            value_type = rstream.read(1)
+            if codec.proto_rev >= 0x0300:
+                msg_id, seq_num_uid, flags = rstream.readStruct(codec.entryAssign)
+            else:
+                msg_id, seq_num_uid = rstream.readStruct(codec.entryAssign)
+                
+            value = codec.read_value(value_type, rstream)
         
         elif msgtype == kEntryUpdate:
-            pass
+            if codec.proto_rev >= 0x0300:
+                msg_id, seq_num_uid = rstream.readStruct(codec.entryUpdate)
+                value_type = rstream.read(1)
+            else:
+                msg_id, seq_num_uid = rstream.readStruct(codec.entryUpdate)
+                value_type = get_entry_type(seq_num_uid)
             
-            # getEntryFunc... how was I going to deal with that?
-        
+            value = codec.read_value(value_type, rstream)
+            
         elif msgtype == kFlagsUpdate:
-            try:
-                msg_id, flags = rstream.readStruct(codec.flagsUpdate)
-            except AttributeError:
-                raise # TODO: nt3 only
+            msg_id, flags = rstream.readStruct(codec.flagsUpdate)
         
         elif msgtype == kEntryDelete:
-            try:
-                msg_id, = rstream.readStruct(codec.entryDelete)
-            except AttributeError:
-                raise # TODO: nt3 only
+            msg_id, = rstream.readStruct(codec.entryDelete)
         
         elif msgtype == kClearEntries:
-            try:
-                magic, = rstream.readStruct(codec.clearEntries)
-            except AttributeError:
-                pass
+            msg_id, = rstream.readStruct(codec.clearEntries)
+            if msg_id != kClearAllMagic:
+                raise ValueError("Bad magic")
         
         elif msgtype == kExecuteRpc:
-            try:
-                msg_id, seq_num_uid = rstream.readStruct(codec.executeRpc)
-            except AttributeError:
-                pass # todo: nt3 only
-
+            msg_id, seq_num_uid = rstream.readStruct(codec.executeRpc)
             msg_str = codec.read_string(rstream)
         
         elif msgtype == kRpcResponse:
-            try:
-                msg_id, seq_num_uid = rstream.readStruct(codec.executeRpc)
-            except AttributeError:
-                pass # todo: nt3 only
-
+            msg_id, seq_num_uid = rstream.readStruct(codec.rpcResponse)
             msg_str = codec.read_string(rstream)
+            
+        else:
+            raise ValueError("Unrecognized message type %s" % msgtype)
         
-        raise ValueError("Unrecognized message type %s" % msgtype)
-        
-        # create message
+        return MessageType(msgtype, msg_str, value, msg_id, flags, seq_num_uid)
     
     @staticmethod
     def write(msg, out, codec):
         msgtype = msg.type
         
         # switch type
-        if msgtype == kKeepAlive:
+        if msgtype in _empty_msgtypes:
             out.append(msgtype)
         
         elif msgtype == kClientHello:
             proto_rev = msg.id
-            out.append(codec.clientHello.pack(proto_rev))
+            out += (msgtype,
+                    codec.clientHello.pack(proto_rev))
             
-            if msg.id >= 0x0300:
-                codec.write_string(msg.str, out)
+            if proto_rev >= 0x0300:
+                codec.write_string_v3(msg.str, out)
                     
         elif msgtype == kProtoUnsup:
-            proto_rev, = rstream.readStruct(codec.protoUnsup)
-            return ProtoMessage(kProtoUnsup, proto_rev)
-        
-        elif msgtype == kServerHelloDone:
-            return EmptyMessage(msgtype)
-        
+            out += (msgtype,
+                    codec.protoUnsup.pack(msg.id))
+            
         elif msgtype == kServerHello:
-            # nt3 only
-            try:
-                flags, str = rstream.readStruct(codec.serverHello)
-            except AttributeError:
-                raise # TODO: better error message
-        
+            out += (msgtype,
+                    codec.serverHello.pack(msg.flags))
+            codec.write_string(msg.str, out)
+            
         elif msgtype == kEntryAssign:
-            pass
+            out.append(msgtype)
+            codec.write_string(msg.str, out)
+            
+            value = msg.value
+            if codec.proto_rev >= 0x0300:
+                sb = codec.entryAssign.pack(msg.id, msg.seq_num_uid, msg.flags)
+            else:
+                sb = codec.entryAssign.pack(msg.id, msg.seq_num_uid)
+            out += (value.type, sb)
+            
+            codec.write_value(value, out)
         
         elif msgtype == kEntryUpdate:
-            pass
-            
-            # getEntryFunc... how was I going to deal with that?
+            value = msg.value
+            if codec.proto_rev >= 0x0300:
+                out += (msgtype,
+                        codec.entryUpdate.pack(msg.id, msg.seq_num_uid),
+                        value.type)
+            else:
+                out += (msgtype,
+                        codec.entryUpdate.pack(msg.id, msg.seq_num_uid))
+                
+            codec.write_value(value, out)
         
         elif msgtype == kFlagsUpdate:
-            try:
-                msg_id, flags = rstream.readStruct(codec.flagsUpdate)
-            except AttributeError:
-                raise # TODO: nt3 only
+            out += (msgtype,
+                    codec.flagsUpdate.pack(msg.id, msg.flags))
         
         elif msgtype == kEntryDelete:
-            try:
-                msg_id, = rstream.readStruct(codec.entryDelete)
-            except AttributeError:
-                raise # TODO: nt3 only
-        
+            out += (msgtype,
+                    codec.entryDelete.pack(msg.id))
+            
         elif msgtype == kClearEntries:
-            try:
-                magic, = rstream.readStruct(codec.clearEntries)
-            except AttributeError:
-                pass
+            out += (msgtype,
+                    codec.clearEntries.pack(msg.id))
         
         elif msgtype == kExecuteRpc:
-            
-            try:
-                msg_id, seq_num_uid = rstream.readStruct(codec.executeRpc)
-            except AttributeError:
-                pass # todo: nt3 only
-
-            msg_str = codec.read_string(rstream)
+            out += (msgtype,
+                    codec.executeRpc.pack(msg.id, msg.seq_num_uid))
+            codec.write_string(msg.str, out)
         
         elif msgtype == kRpcResponse:
+            out += (msgtype,
+                    codec.rpcResponse.pack(msg.id, msg.seq_num_uid))
+            codec.write_string(msg.str, out)
         
-        
+        else:
+            raise ValueError("Internal error: bad value type %s" % msg.type)
         
         

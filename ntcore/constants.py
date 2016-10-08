@@ -35,3 +35,5 @@ kEntryDelete =      b'\x13'
 kClearEntries =     b'\x14'
 kExecuteRpc =       b'\x20'
 kRpcResponse =      b'\x21'
+
+kClearAllMagic =    0xD06CB27A
