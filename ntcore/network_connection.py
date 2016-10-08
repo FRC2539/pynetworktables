@@ -199,7 +199,7 @@ class NetworkConnection(object):
     
             if verbose:
                 logger.debug('received type=%s with str=%s id=%s seq_num=%s',
-                             msg.type(), msg.str(), msg.id(), msg.seq_num_uid())
+                             msg.type, msg.str, msg.id, msg.seq_num_uid)
             
             self.m_last_update = monotonic()
             self.m_process_incoming(msg, self)
@@ -239,7 +239,7 @@ class NetworkConnection(object):
                 if msg:
                     if verbose:
                         logger.debug('sending type=%s with str=%s id=%s seq_num=%s',
-                                     msg.type(), msg.str(), msg.id(), ms.seq_num_uid())
+                                     msg.type, msg.str, msg.id, ms.seq_num_uid)
                     
                     msg.write(encoder)
             
@@ -271,11 +271,11 @@ class NetworkConnection(object):
         with self.m_pending_mutex:
     
             # Merge with previous.  One case we don't combine: delete/assign loop.
-            switch (msg.type())
+            switch (msg.type)
             case Message.kEntryAssign:
             case Message.kEntryUpdate:
                 # don't do self for unassigned id's
-                unsigned id = msg.id()
+                unsigned id = msg.id
                 if id == 0xffff:
                     self.m_pending_outgoing.push_back(msg)
                     break
@@ -283,11 +283,11 @@ class NetworkConnection(object):
                 if id < self.m_pending_update.size() and self.m_pending_update[id].first != 0:
                     # overwrite the previous one for self id
                     oldmsg = self.m_pending_outgoing[m_pending_update[id].first - 1]
-                    if (oldmsg and oldmsg.isType(Message.kEntryAssign) and
-                            msg.isType(Message.kEntryUpdate))
+                    if (oldmsg and oldmsg.type == Message.kEntryAssign and
+                            msg.type == Message.kEntryUpdate)
                         # need to update assignment with seq_num and value
-                        oldmsg = Message.entryAssign(oldmsg.str(), id, msg.seq_num_uid(),
-                                                      msg.value(), oldmsg.flags())
+                        oldmsg = Message.entryAssign(oldmsg.str, id, msg.seq_num_uid,
+                                                      msg.value, oldmsg.flags)
         
                     else:
                         oldmsg = msg;    # easy update
@@ -306,7 +306,7 @@ class NetworkConnection(object):
         
             case Message.kEntryDelete:
                 # don't do self for unassigned id's
-                unsigned id = msg.id()
+                unsigned id = msg.id
                 if id == 0xffff:
                     self.m_pending_outgoing.push_back(msg)
                     break
@@ -330,7 +330,7 @@ class NetworkConnection(object):
         
             case Message.kFlagsUpdate:
                 # don't do self for unassigned id's
-                unsigned id = msg.id()
+                unsigned id = msg.id
                 if id == 0xffff:
                     self.m_pending_outgoing.push_back(msg)
                     break

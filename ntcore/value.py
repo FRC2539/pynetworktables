@@ -12,7 +12,7 @@
 
 
 from collections import namedtuple
-from .structs import (
+from .constants import (
     NT_BOOLEAN,
     NT_DOUBLE,
     NT_STRING,

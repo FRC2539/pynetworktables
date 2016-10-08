@@ -17,8 +17,9 @@ class ReadStream:
         return data
 
     def readStruct(self, s):
-        data = self.f.read(s.size)
-        if len(data) != s.size:
+        sz = s.size
+        data = self.f.read(sz)
+        if len(data) != sz:
             raise StreamEOF("end of file")
         return s.unpack(data)
 
@@ -36,6 +37,7 @@ class TCPStream(object):
         self.close()    
     
     def send(self, buffer, len, err):
+        '''
         # TODO: change to return True/False (unless this gets changed to a stream
         if self.m_sd < 0:
             *err = kConnectionClosed
@@ -109,7 +111,7 @@ class TCPStream(object):
             return 0
     
         return static_cast<std.size_t>(rv)
-    
+        '''
     
     def close(self):
         if self.m_sd:

@@ -129,7 +129,7 @@ class Storage(object):
     def processIncoming(self, msg, conn):
         # Note: c++ version takes a third param (weak_conn), but it's
         #       not needed here as conn == weak_conn
-        fn = self._process_fns.get(msg.type())
+        fn = self._process_fns.get(msg.type)
         if fn:
             queue_outgoing = None
             with self.m_mutex:
@@ -144,8 +144,8 @@ class Storage(object):
     
     def _processEntryAssign(self, msg, conn):
 
-        msg_id = msg.id()
-        name = msg.str()
+        msg_id = msg.id
+        name = msg.str
         entry = None
         may_need_update = False
         if self.m_server:
@@ -163,8 +163,8 @@ class Storage(object):
                 msg_id = len(self.m_idmap)
                 self.m_entries[name] = entry
                 
-                entry.value = msg.value()
-                entry.flags = msg.flags()
+                entry.value = msg.value
+                entry.flags = msg.flags
                 entry.id = msg_id
                 self.m_idmap.append(entry)
 
@@ -178,7 +178,7 @@ class Storage(object):
                 # send the assignment to everyone (including the originator)
                 if self.m_queue_outgoing:
                     queue_outgoing = self.m_queue_outgoing
-                    outmsg = Message.entryAssign(name, msg_id, entry.seq_num, msg.value(), msg.flags())
+                    outmsg = Message.entryAssign(name, msg_id, entry.seq_num, msg.value, msg.flags)
                     lock.unlock()
                     queue_outgoing(outmsg, None, None)
 
@@ -210,13 +210,13 @@ class Storage(object):
                     # didn't exist at all (rather than just being a response to a
                     # id assignment request)
                     entry = Entry(name)
-                    entry.value = msg.value()
-                    entry.flags = msg.flags()
+                    entry.value = msg.value
+                    entry.flags = msg.flags
                     entry.id = msg_id
                     self.m_idmap[msg_id] = entry
 
                     # notify
-                    self.m_notifier.notifyEntry(name, new_entry.value, NT_NOTIFY_NEW)
+                    self.m_notifier.notifyEntry(name, entry.value, NT_NOTIFY_NEW)
                     return
 
                 may_need_update = True;  # we may need to send an update message
@@ -225,7 +225,7 @@ class Storage(object):
 
                 # if the received flags don't match what we sent, most likely
                 # updated flags locally in the interim; send flags update message.
-                if msg.flags() != entry.flags:
+                if msg.flags != entry.flags:
                     queue_outgoing = self.m_queue_outgoing
                     outmsg = Message.flagsUpdate(msg_id, entry.flags)
                     lock.unlock()
@@ -238,7 +238,7 @@ class Storage(object):
         # common client and server handling
 
         # already exists; ignore if sequence number not higher than local
-        seq_num = msg.seq_num_uid()
+        seq_num = msg.seq_num_uid
         if entry.isSeqNewerThan(seq_num):
             if may_need_update:
                 queue_outgoing = self.m_queue_outgoing
@@ -251,7 +251,7 @@ class Storage(object):
 
 
         # sanity check: name should match id
-        if msg.str() != entry.name:
+        if msg.str != entry.name:
             logger.debug("entry assignment for same id with different name?")
             return
 
@@ -262,22 +262,22 @@ class Storage(object):
         # don't update flags if self is a server response to a client id request
         if not may_need_update and conn.proto_rev() >= 0x0300:
             # update persistent dirty flag if persistent flag changed
-            if (entry.flags & NT_PERSISTENT) != (msg.flags() & NT_PERSISTENT):
+            if (entry.flags & NT_PERSISTENT) != (msg.flags & NT_PERSISTENT):
                 self.m_persistent_dirty = True
 
-            if entry.flags != msg.flags():
+            if entry.flags != msg.flags:
                 notify_flags |= NT_NOTIFY_FLAGS
 
-            entry.flags = msg.flags()
+            entry.flags = msg.flags
 
 
         # update persistent dirty flag if the value changed and it's persistent
-        if entry.isPersistent() and entry.value != msg.value():
+        if entry.isPersistent() and entry.value != msg.value:
             self.m_persistent_dirty = True
 
 
         # update local
-        entry.value = msg.value()
+        entry.value = msg.value
         entry.seq_num = seq_num
 
         # notify
@@ -287,13 +287,13 @@ class Storage(object):
         # be any other connections, don't bother)
         if self.m_server and self.m_queue_outgoing:
             queue_outgoing = self.m_queue_outgoing
-            outmsg = Message.entryAssign(entry.name, msg_id, msg.seq_num_uid(),
-                                         msg.value(), entry.flags)
+            outmsg = Message.entryAssign(entry.name, msg_id, msg.seq_num_uid,
+                                         msg.value, entry.flags)
             lock.unlock()
             queue_outgoing(outmsg, None, conn)
     
     def _processEntryUpdate(self, msg, conn):
-        msg_id = msg.id()
+        msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
             # self can happen due to deleted entries
@@ -303,13 +303,13 @@ class Storage(object):
         entry = self.m_idmap[msg_id]
 
         # ignore if sequence number not higher than local
-        seq_num = msg.seq_num_uid()
+        seq_num = msg.seq_num_uid
         if entry.isSeqNewerThan(seq_num):
             return
 
 
         # update local
-        entry.value = msg.value()
+        entry.value = msg.value
         entry.seq_num = seq_num
 
         # update persistent dirty flag if it's a persistent value
@@ -328,7 +328,7 @@ class Storage(object):
             queue_outgoing(msg, None, conn)
     
     def _processFlagsUpdate(self, msg, conn):
-        msg_id = msg.id()
+        msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
             # self can happen due to deleted entries
@@ -338,17 +338,17 @@ class Storage(object):
         entry = self.m_idmap[msg_id]
 
         # ignore if flags didn't actually change
-        if entry.flags == msg.flags():
+        if entry.flags == msg.flags:
             return
 
 
         # update persistent dirty flag if persistent flag changed
-        if (entry.flags & NT_PERSISTENT) != (msg.flags() & NT_PERSISTENT):
+        if (entry.flags & NT_PERSISTENT) != (msg.flags & NT_PERSISTENT):
             self.m_persistent_dirty = True
 
 
         # update local
-        entry.flags = msg.flags()
+        entry.flags = msg.flags
 
         # notify
         self.m_notifier.notifyEntry(entry.name, entry.value, NT_NOTIFY_FLAGS)
@@ -361,7 +361,7 @@ class Storage(object):
             queue_outgoing(msg, None, conn)
     
     def _processEntryDelete(self, msg, conn):
-        msg_id = msg.id()
+        msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
             # self can happen due to deleted entries
@@ -409,7 +409,7 @@ class Storage(object):
         if not self.m_server:
             return    # only process on server
 
-        msg_id = msg.id()
+        msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore call to non-existent RPC
             # self can happen due to deleted entries
@@ -428,7 +428,7 @@ class Storage(object):
         if self.m_server:
             return    # only process on client
         
-        self.m_rpc_results[(msg.id(), msg.seq_num_uid())] = msg.str()
+        self.m_rpc_results[(msg.id, msg.seq_num_uid)] = msg.str
         self.m_rpc_results_cond.notify_all()
     
     def getInitialAssignments(self, conn, msgs):
@@ -457,22 +457,22 @@ class Storage(object):
         
             # apply assignments
             for msg in msgs:
-                if not msg.isType(Message.kEntryAssign):
+                if msg.type != Message.kEntryAssign:
                     logger.debug("client: received non-entry assignment request?")
                     continue
         
-                msg_id = msg.id()
+                msg_id = msg.id
                 if msg_id == 0xffff:
                     logger.debug("client: received entry assignment request?")
                     continue
         
-                seq_num = msg.seq_num_uid()
-                name = msg.str()
+                seq_num = msg.seq_num_uid
+                name = msg.str
         
                 entry = self.m_entries.get(name)
                 if not entry:
                     # doesn't currently exist
-                    entry = Entry(name, msg.value(), msg.flags(), seq_num)
+                    entry = Entry(name, msg.value, msg.flags, seq_num)
                     self.m_entries[name] = entry
                     
                     # notify
@@ -486,15 +486,15 @@ class Storage(object):
                         update_msgs.append(Message.entryUpdate(entry.id, entry.seq_num, entry.value))
         
                     else:
-                        entry.value = msg.value()
+                        entry.value = msg.value
                         entry.seq_num = seq_num
                         notify_flags = NT_NOTIFY_UPDATE
                         # don't update flags from a <3.0 remote (not part of message)
                         if conn.proto_rev() >= 0x0300:
-                            if entry.flags != msg.flags():
+                            if entry.flags != msg.flags:
                                 notify_flags |= NT_NOTIFY_FLAGS
         
-                            entry.flags = msg.flags()
+                            entry.flags = msg.flags
         
                         # notify
                         self.m_notifier.notifyEntry(name, entry.value, notify_flags)
@@ -1076,7 +1076,7 @@ class Storage(object):
     
     def _process_rpc(self, msg):
         with self.m_mutex:
-            self.m_rpc_results[(msg.id(), msg.seq_num_uid())] = msg.str()
+            self.m_rpc_results[(msg.id, msg.seq_num_uid)] = msg.str
             self.m_rpc_results_cond.notify_all()
     
     def getRpcResult(self, blocking, call_uid, time_out=-1):

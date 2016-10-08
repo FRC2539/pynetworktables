@@ -1,25 +1,7 @@
 
 from collections import namedtuple
 
-# data types
-NT_UNASSIGNED = b'\x00'
-NT_BOOLEAN = b'\x01'
-NT_DOUBLE = b'\x02'
-NT_STRING = b'\x04'
-NT_RAW = b'\x08'
-NT_BOOLEAN_ARRAY = b'\x10'
-NT_DOUBLE_ARRAY = b'\x20'
-NT_STRING_ARRAY = b'\x40'
-NT_RPC = b'\x80'
 
-# NetworkTables notifier kinds.
-NT_NOTIFY_NONE = 0
-NT_NOTIFY_IMMEDIATE = 0x01  # initial listener addition
-NT_NOTIFY_LOCAL = 0x02      # changed locally
-NT_NOTIFY_NEW = 0x04        # newly created entry
-NT_NOTIFY_DELETE = 0x08     # deleted
-NT_NOTIFY_UPDATE = 0x10     # value changed
-NT_NOTIFY_FLAGS = 0x20      # flags changed 
 
 
 #: NetworkTables Entry Information

@@ -367,8 +367,8 @@ class Dispatcher(object):
             logger.debug("client: server disconnected before first response")
             return False
         
-        if msg.isType(Message.kProtoUnsup):
-            if msg.id() == 0x0200:
+        if msg.type == Message.kProtoUnsup:
+            if msg.id == 0x0200:
                 self._clientReconnect(0x0200)
     
             return False
@@ -376,11 +376,11 @@ class Dispatcher(object):
         new_server = True
         if conn.proto_rev() >= 0x0300:
             # should be server hello; if not, disconnect.
-            if not msg.isType(Message.kServerHello):
+            if not msg.type == Message.kServerHello:
                 return False
     
-            conn.set_remote_id(msg.str())
-            if (msg.flags() & 1) != 0:
+            conn.set_remote_id(msg.str)
+            if (msg.flags & 1) != 0:
                 new_server = False
     
             # get the next message
@@ -396,15 +396,15 @@ class Dispatcher(object):
     
             if self.m_verbose:
                 logger.debug("received init str=%s id=%s seq_num=%s",
-                             msg.str(), msg.id(). msg.seq_num_uid())
+                             msg.str, msg.id. msg.seq_num_uid)
                 
-            if msg.isType(Message.kServerHelloDone):
+            if msg.type == Message.kServerHelloDone:
                 break
     
-            if not msg.isType(Message.kEntryAssign):
+            if not msg.type == Message.kEntryAssign:
                 # unexpected message
                 logger.debug("client: received message (%s) other than entry assignment during initial handshake",
-                             msg.type())
+                             msg.type)
                 return False
     
             incoming.add(msg)
@@ -434,19 +434,19 @@ class Dispatcher(object):
             logger.debug("server: client disconnected before sending hello")
             return False
     
-        if not msg.isType(Message.kClientHello):
+        if not msg.type == Message.kClientHello:
             logger.debug("server: client initial message was not client hello")
             return False
     
         # Check that the client requested version is not too high.
-        proto_rev = msg.id()
+        proto_rev = msg.id
         if proto_rev > 0x0300:
             logger.debug("server: client requested proto > 0x0300")
             send_msgs(Message.protoUnsup())
             return False
     
         if proto_rev >= 0x0300:
-            conn.set_remote_id(msg.str())
+            conn.set_remote_id(msg.str)
     
         # Set the proto version to the client requested version
         logger.debug("server: client protocol %s", proto_rev)
@@ -484,13 +484,13 @@ class Dispatcher(object):
                     logger.debug("server: disconnected waiting for initial entries")
                     return False
     
-                if msg.isType(Message.kClientHelloDone):
+                if msg.type == Message.kClientHelloDone:
                     break
     
-                if not msg.isType(Message.kEntryAssign):
+                if msg.type != Message.kEntryAssign:
                     # unexpected message
                     logger.debug("server: received message (%s) other than entry assignment during initial handshake",
-                                 msg.type())
+                                 msg.type)
                     return False
     
                 incoming.append(msg)
