@@ -15,6 +15,7 @@ from .persistence import load_entries, save_entries
 from .value import Value
 
 from .support.file_support import file_replace
+from .support.lists import ensure_id_exists
 
 import logging
 logger = logging.getLogger('nt')
@@ -198,10 +199,8 @@ class Storage(object):
                 logger.debug("client: received entry assignment request?")
                 return
 
-            if msg_id >= len(self.m_idmap):
-                # resize idmap
-                self.m_idmap += [None]*(id - len(self.m_idmap)+1)
-
+            ensure_id_exists(self.m_idmap, msg_id)
+            
             entry = self.m_idmap[msg_id]
             if not entry:
                 # create local
@@ -501,10 +500,8 @@ class Storage(object):
         
                 # set id and save to idmap
                 entry.id = msg_id
-                if msg_id >= len(self.m_idmap):
-                    # resize idmap
-                    self.m_idmap += [None]*(id - len(self.m_idmap)+1)
-        
+                
+                ensure_id_exists(self.m_idmap, msg_id)
                 self.m_idmap[id] = entry
             
             # generate assign messages for unassigned local entries

@@ -13,7 +13,7 @@ try:
 except ImportError:
     from ConfigParser import RawConfigParser
 
-from .structs import *
+from .constants import *
 from .value import Value
 
 import logging

@@ -5,123 +5,51 @@
 ''' the project.                                                               '''
 '''----------------------------------------------------------------------------'''
 
+import threading
+
+from .support.compat import Queue, Empty
+
 import logging
 logger = logging.getLogger('nt')
 
 
-# Vector which provides an integrated freelist for removal and reuse of
-# individual elements.
-template <typename T>
-class UidVector
-public:
-    typedef typename std.vector<T>.size_type size_type
-
-    size_type size()
-        return self.m_vector.size()
-
-    T& operator[](size_type i)
-        return self.m_vector[i]
-
-     T& operator[](size_type i)
-        return self.m_vector[i]
+class _Escape(Exception):
+    pass
 
 
-    # Add a T to the vector.  If there are elements on the freelist,
-    # reuses the last one; otherwise adds to the end of the vector.
-    # Returns the resulting element index (+1).
-    template <class... Args>
-    unsigned int emplace_back(Argsand... args)
-        unsigned int uid
-        if self.m_free.empty():
-            uid = self.m_vector.size()
-            self.m_vector.emplace_back(std.forward<Args>(args)...)
+class UidVector(dict):
+    
+    def __init__(self):
+        self.idx = 0
+        self.lock = threading.Lock()
+    
+    def add(self, item):
+        with self.lock:
+            idx = self.idx
+            idx += 1
+        
+        self[idx] = item
+        return idx
 
-        else:
-            uid = self.m_free.back()
-            self.m_free.pop_back()
-            self.m_vector[uid] = T(std.forward<Args>(args)...)
-
-        return uid + 1
-
-
-    # Removes the identified element by replacing it with a default-constructed
-    # one.  The element is added to the freelist for later reuse.
-    void erase(unsigned int uid)
-        --uid
-        if uid >= self.m_vector.size() or not self.m_vector[uid]:
-            return
-
-        self.m_free.push_back(uid)
-        self.m_vector[uid] = T()
-
-
-private:
-    std.vector<T> self.m_vector
-    std.vector<unsigned int> self.m_free
-
-
-}  # anonymous namespace
-
-class Notifier.Thread : public wpi.SafeThread
-public:
-    Thread(std.function<void()> on_start, std.function<void()> on_exit)
-        : self.m_on_start(on_start), self.m_on_exit(on_exit) {
-
-    void Main()
-
-    struct EntryListener
-        EntryListener() = default
-        EntryListener(StringRef prefix_, callback_,
-                      unsigned int flags_)
-            : prefix(prefix_), callback(callback_), flags(flags_) {
-
-        explicit operator bool()
-            return bool(callback)
-
-
-        std.string prefix
-        EntryListenerCallback callback
-        unsigned int flags
-
-    UidVector<EntryListener> self.m_entry_listeners
-    UidVector<ConnectionListenerCallback> self.m_conn_listeners
-
-    struct EntryNotification
-        EntryNotification(llvm.StringRef name_, value_,
-                          unsigned int flags_, only_)
-            : name(name_),
-              value(value_),
-              flags(flags_),
-              only(only_) {
-
-        std.string name
-        std.shared_ptr<Value> value
-        unsigned int flags
-        EntryListenerCallback only
-
-    std.queue<EntryNotification> self.m_entry_notifications
-
-    struct ConnectionNotification
-        ConnectionNotification(bool connected_, conn_info_,
-                               ConnectionListenerCallback only_)
-            : connected(connected_), conn_info(conn_info_), only(only_) {
-
-        bool connected
-        ConnectionInfo conn_info
-        ConnectionListenerCallback only
-
-    std.queue<ConnectionNotification> self.m_conn_notifications
-
-    std.function<void()> self.m_on_start
-    std.function<void()> self.m_on_exit
 
 class Notifier(object):
 
     def __init__(self):
+        self.m_mutex = threading.Lock()
+        
         self.m_owner = None
         self.m_local_notifiers = False
+        
+        self.m_entry_listeners = UidVector()
+        self.m_conn_listeners = UidVector()
+        
+        self.m_entry_notificiations = queue.Queue()
+        self.m_conn_notifications = queue.Queue()
+        
         self.m_on_start = None
         self.m_on_exit = None
+        
+        
         
         
         #s_destroyed = False
@@ -131,9 +59,9 @@ class Notifier(object):
     
     
     def start(self):
-        thr = self.m_owner.GetThread()
-        if not thr:
-            self.m_owner.Start(new Thread(m_on_start, self.m_on_exit))
+        if not self.m_owner:
+            self.m_owner = threading.Thread(target=self._thread_main, name='notifier_thread')
+            self.m_owner.start()
     
     def stop(self):
         self.m_owner.Stop()
@@ -143,7 +71,8 @@ class Notifier(object):
         if self.m_on_start:
             self.m_on_start()
         
-        with self.m_mutex:
+        
+        try:
             while self.m_active:
                 while (m_entry_notifications.empty() and self.m_conn_notifications.empty())
                     self.m_cond.wait(lock)
@@ -155,9 +84,9 @@ class Notifier(object):
                 # Entry notifications
                 while (not self.m_entry_notifications.empty())
                     if not self.m_active:
-                        goto done
+                        raise _Escape() # goto done
         
-                    item = std.move(m_entry_notifications.front())
+                    item = std.move(self.m_entry_notifications.front())
                     self.m_entry_notifications.pop()
         
                     if not item.value:
@@ -167,9 +96,13 @@ class Notifier(object):
         
                     if item.only:
                         # Don't hold mutex during callback execution!
-                        lock.unlock()
-                        item.only(0, name, item.value, item.flags)
-                        lock.lock()
+                        lock.release()
+                        try:
+                            item.only(0, item.name, item.value, item.flags)
+                        except Exception:
+                            logger.warn("Unhandled exception processing notify callback", exc_info=True)
+                            
+                        lock.acquire()
                         continue
         
         
@@ -214,7 +147,7 @@ class Notifier(object):
                 # Connection notifications
                 while (not self.m_conn_notifications.empty())
                     if not self.m_active:
-                        goto done
+                        raise _Escape() # goto done
         
                     item = std.move(m_conn_notifications.front())
                     self.m_conn_notifications.pop()
@@ -237,11 +170,13 @@ class Notifier(object):
                         lock.unlock()
                         callback(i+1, item.connected, item.conn_info)
                         lock.lock()
-    
-    
-    
-    
-    done:
+        except _Escape:
+            pass # goto substitute
+        except Exception:
+            logger.exception("Unhandled exception in notifier thread")
+        
+        logger.debug('Notifier thread exiting')
+        
         if self.m_on_exit:
             self.m_on_exit()
     

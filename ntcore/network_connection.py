@@ -5,17 +5,31 @@
 ''' the project.                                                               '''
 '''----------------------------------------------------------------------------'''
 
-try:
-    from queue import Queue, Empty
-except ImportError:
-    from Queue import Queue, Empty
+
 
 import threading
 
 from monotonic import monotonic
 
+from .constants import (
+    kEntryAssign,
+    kEntryUpdate,
+    kFlagsUpdate,
+    kEntryDelete,
+    kClearEntries,
+)
+
+from .message import Message
+from .structs import ConnectionInfo
+from .wire import WireCodec
+
+from .support.compat import Queue, Empty
+from .support.lists import Pair
+
 import logging
 logger = logging.getLogger('nt')
+
+_empty_pair = Pair(0, 0)
 
 
 class NetworkConnection(object):
@@ -34,7 +48,7 @@ class NetworkConnection(object):
     def __init__(self, stream, notifier, handshake, get_entry_type, verbose=False):
         
         with self.s_uid_lock:
-            self.m_uid = s_uid
+            self.m_uid = NetworkConnection.s_uid
             NetworkConnection.s_uid += 1
             
         # logging debugging
@@ -61,8 +75,8 @@ class NetworkConnection(object):
         self.m_last_post = None
         
         self.m_pending_mutex = threading.Lock()
-        self.m_pending_outgoing = [] # list of lists
-        self.m_pending_update = []
+        self.m_pending_outgoing = []
+        self.m_pending_update = {}
         
         # Condition variables for shutdown
         self.m_shutdown_mutex = threading.Lock()
@@ -109,11 +123,10 @@ class NetworkConnection(object):
     
     def stop(self):
         logger.debug("NetworkConnection stopping (%s)", self)
-        self.m_state = State.kDead
+        self.m_state = self.State.kDead
         self.m_active = False
         # closing the stream so the read thread terminates
-        if self.m_stream:
-            self.m_stream.close()
+        self.m_stream.close()
     
         # send an empty outgoing message set so the write thread terminates
         self.m_outgoing.put([])
@@ -153,107 +166,115 @@ class NetworkConnection(object):
             
     def uid(self):
         return self.m_uid
+     
+    def _sendMessages(self, msgs):
+        self.m_outgoing.push(msgs)
     
     def _readThreadMain(self):
-        decode = WireDecoder(self.m_stream, self.m_proto_rev)
+        decoder = WireCodec(self.m_proto_rev)
         
         verbose = self.m_verbose
+        
+        def _getMessage():
+            decoder.set_proto_rev(self.m_proto_rev)
+            return Message.read(self.m_stream, decoder, self.m_get_entry_type)
     
         self.m_state = self.State.kHandshake
-        if (not self.m_handshake(*self,
-                         [&]
-        decoder.set_proto_rev(m_proto_rev)
-            msg = Message.read(decoder, self.m_get_entry_type)
-            if not msg and decoder.error():
-                logger.debug("error reading in handshake: %s", decoder.error())
-            return msg
-        },
-        [&](llvm.ArrayRef<std.shared_ptr<Message>> msgs)
-            self.m_outgoing.emplace(msgs)
-        }))
+        if not self.m_handshake(_getMessage, self._sendMessages):
             self.m_state = self.State.kDead
             self.m_active = False
-            goto done
-    
-    
-        self.m_state = self.State.kActive
-        self.m_notifier.notifyConnection(True, info())
-        while self.m_active:
-            if not self.m_stream:
-                break
-    
-            decoder.set_proto_rev(self.m_proto_rev)
-            decoder.reset()
+        else:
+            self.m_state = self.State.kActive
+            self.m_notifier.notifyConnection(True, self.info())
             
             try:
-                msg = Message.read(decoder, self.m_get_entry_type)
-            except IOError:
-                if decoder.error():
-                    logger.info("read error: %s", decoder.error())
-    
-                # terminate connection on bad message
-                if self.m_stream:
-                    self.m_stream.close()
-    
-                break
-    
-            if verbose:
-                logger.debug('received type=%s with str=%s id=%s seq_num=%s',
-                             msg.type, msg.str, msg.id, msg.seq_num_uid)
+                while self.m_active:
+                    if not self.m_stream:
+                        break
             
-            self.m_last_update = monotonic()
-            self.m_process_incoming(msg, self)
-    
-        logger.debug("read thread died (%s)", self)
-        if self.m_state != self.State.kDead:
-            self.m_notifier.notifyConnection(False, self.info())
-    
-        self.m_state = self.State.kDead
-        self.m_active = False
-        self.m_outgoing.put([])  # also kill write thread
+                    decoder.set_proto_rev(self.m_proto_rev)
+                    
+                    try:
+                        msg = Message.read(decoder, self.m_get_entry_type)
+                    except Exception as e:
+                        logger.warn("read error: %s", e)
+                        
+                        # terminate connection on bad message
+                        self.m_stream.close()
+            
+                        break
+            
+                    if verbose:
+                        logger.debug('received type=%s with str=%s id=%s seq_num=%s',
+                                     msg.type, msg.str, msg.id, msg.seq_num_uid)
+                    
+                    self.m_last_update = monotonic()
+                    self.m_process_incoming(msg, self)
+            except IOError as e:
+                # connection died probably
+                logger.debug("IOError in read thread: %s", e)
+            except Exception:
+                logger.warn("Unhandled exception in read thread", exc_info=True)
+                
+            logger.debug("read thread died (%s)", self)
+            if self.m_state != self.State.kDead:
+                self.m_notifier.notifyConnection(False, self.info())
+        
+            self.m_state = self.State.kDead
+            self.m_active = False
+            self.m_outgoing.put([])  # also kill write thread
         
         with self.m_shutdown_mutex:
             self.m_read_shutdown = True
     
     def _writeThreadMain(self):
-        encoder = WireEncoder(self.m_proto_rev)
+        encoder = WireCodec(self.m_proto_rev)
     
-        verbose = self.m_verbose 
+        verbose = self.m_verbose
+        out = []
     
-        while self.m_active:
-            msgs = self.m_outgoing.get()
+        try:
+            while self.m_active:
+                msgs = self.m_outgoing.get()
+                
+                if verbose:
+                    logger.debug("write thread woke up")
+                
+                if not msgs:
+                    continue
+        
+                encoder.set_proto_rev(self.m_proto_rev)
+                
+                if verbose:
+                    logger.debug('sending %s messages', len(msgs))
+                
+                for msg in msgs:
+                    if msg:
+                        if verbose:
+                            logger.debug('sending type=%s with str=%s id=%s seq_num=%s',
+                                         msg.type, msg.str, msg.id, msg.seq_num_uid)
+                        
+                        Message.write(msg, out, encoder)
+                
+                if not self.m_stream:
+                    break
+        
+                if not out:
+                    continue
+        
+                if not self.m_stream.send(b''.join(out)):
+                    break
+                
+                del out[:]
+        
+                #if verbose:
+                #    logger.debug('send %s bytes', encoder.size())
+        except IOError as e:
+            # connection died probably
+            logger.debug("IOError in write thread: %s", e)
+        except Exception:
+            logger.warn("Unhandled exception in write thread", exc_info=True)
             
-            if verbose:
-                logger.debug("write thread woke up")
-            
-            if not msgs:
-                continue
-    
-            encoder.set_proto_rev(self.m_proto_rev)
-            encoder.reset()
-            
-            if verbose:
-                logger.debug('sending %s messages', len(msgs))
-            
-            for msg in msgs:
-                if msg:
-                    if verbose:
-                        logger.debug('sending type=%s with str=%s id=%s seq_num=%s',
-                                     msg.type, msg.str, msg.id, ms.seq_num_uid)
-                    
-                    msg.write(encoder)
-            
-            if not self.m_stream:
-                break
-    
-            if encoder.size() == 0:
-                continue
-    
-            if not self.m_stream.send(encoder.data(), encoder.size()):
-                break
-    
-            if verbose:
-                logger.debug('send %s bytes', encoder.size())
     
         logger.debug('write thread died (%s)', self)
         if self.m_state != self.State.kDead:
@@ -261,8 +282,7 @@ class NetworkConnection(object):
     
         self.m_state = self.State.kDead
         self.m_active = False
-        if self.m_stream:
-            self.m_stream.close();    # also kill read thread
+        self.m_stream.close() # also kill read thread
         
         with self.m_shutdown_mutex:
             self.m_write_shutdown = True
@@ -271,105 +291,91 @@ class NetworkConnection(object):
         with self.m_pending_mutex:
     
             # Merge with previous.  One case we don't combine: delete/assign loop.
-            switch (msg.type)
-            case Message.kEntryAssign:
-            case Message.kEntryUpdate:
-                # don't do self for unassigned id's
-                unsigned id = msg.id
-                if id == 0xffff:
-                    self.m_pending_outgoing.push_back(msg)
-                    break
+            msgtype = msg.type
+            if msgtype in [kEntryAssign, kEntryUpdate]:
+            
+                # don't do this for unassigned id's
+                msg_id = msg.id
+                if msg_id == 0xffff:
+                    self.m_pending_outgoing.append(msg)
+                    return
         
-                if id < self.m_pending_update.size() and self.m_pending_update[id].first != 0:
-                    # overwrite the previous one for self id
-                    oldmsg = self.m_pending_outgoing[m_pending_update[id].first - 1]
-                    if (oldmsg and oldmsg.type == Message.kEntryAssign and
-                            msg.type == Message.kEntryUpdate)
+                mpend = self.m_pending_update.get(msg_id)
+                if mpend is not None and mpend.first != 0:
+                    # overwrite the previous one for this id
+                    oldidx = mpend.first - 1
+                    oldmsg = self.m_pending_outgoing[oldidx]
+                    if (oldmsg and oldmsg.type == kEntryAssign and msgtype == kEntryUpdate):
                         # need to update assignment with seq_num and value
-                        oldmsg = Message.entryAssign(oldmsg.str, id, msg.seq_num_uid,
+                        oldmsg = Message.entryAssign(oldmsg.str, msg_id, msg.seq_num_uid,
                                                       msg.value, oldmsg.flags)
         
                     else:
-                        oldmsg = msg;    # easy update
-        
-        
+                        oldmsg = msg # easy update
+                        
+                    self.m_pending_outgoing[oldidx] = oldmsg
+                        
                 else:
                     # new, remember it
-                    pos = self.m_pending_outgoing.size()
-                    self.m_pending_outgoing.push_back(msg)
-                    if id >= self.m_pending_update.size():
-                        self.m_pending_update.resize(id + 1)
-        
-                    self.m_pending_update[id].first = pos + 1
-        
-                break
-        
-            case Message.kEntryDelete:
-                # don't do self for unassigned id's
-                unsigned id = msg.id
-                if id == 0xffff:
-                    self.m_pending_outgoing.push_back(msg)
-                    break
-        
-        
+                    pos = len(self.m_pending_outgoing)
+                    self.m_pending_outgoing.append(msg)
+                    self.m_pending_update[msg_id] = Pair(pos + 1, 0)
+
+            elif msgtype == kEntryDelete:
+                # don't do this for unassigned id's
+                msg_id = msg.id
+                if msg_id == 0xffff:
+                    self.m_pending_outgoing.append(msg)
+                    return
+                
                 # clear previous updates
-                if id < self.m_pending_update.size():
-                    if self.m_pending_update[id].first != 0:
-                        self.m_pending_outgoing[m_pending_update[id].first - 1].reset()
-                        self.m_pending_update[id].first = 0
+                mpend = self.m_pending_update.get(msg_id)
+                if mpend is not None:
+                    if mpend.first != 0:
+                        self.m_pending_outgoing[mpend.first - 1] = None
         
-                    if self.m_pending_update[id].second != 0:
-                        self.m_pending_outgoing[m_pending_update[id].second - 1].reset()
-                        self.m_pending_update[id].second = 0
-        
-        
-        
+                    if mpend.second != 0:
+                        self.m_pending_outgoing[mpend.second - 1] = None
+                        
+                    self.m_pending_update[msg_id] = _empty_pair
+                
                 # add deletion
-                self.m_pending_outgoing.push_back(msg)
-                break
-        
-            case Message.kFlagsUpdate:
-                # don't do self for unassigned id's
-                unsigned id = msg.id
+                self.m_pending_outgoing.append(msg)
+                
+            elif msgtype == kFlagsUpdate:
+                # don't do this for unassigned id's
+                msg_id = msg.id
                 if id == 0xffff:
-                    self.m_pending_outgoing.push_back(msg)
-                    break
+                    self.m_pending_outgoing.append(msg)
+                    return
         
-                if id < self.m_pending_update.size() and self.m_pending_update[id].second != 0:
-                    # overwrite the previous one for self id
-                    self.m_pending_outgoing[m_pending_update[id].second - 1] = msg
+                mpend = self.m_pending_update.get(msg_id)
+                if mpend is not None and mpend.second != 0:
+                    # overwrite the previous one for this id
+                    self.m_pending_outgoing[mpend.second - 1] = msg
         
                 else:
                     # new, remember it
-                    pos = self.m_pending_outgoing.size()
-                    self.m_pending_outgoing.push_back(msg)
-                    if id >= self.m_pending_update.size():
-                        self.m_pending_update.resize(id + 1)
-        
-                    self.m_pending_update[id].second = pos + 1
-        
-                break
-        
-            case Message.kClearEntries:
+                    pos = len(self.m_pending_outgoing)
+                    self.m_pending_outgoing.append(msg)
+                    self.m_pending_update[msg_id] = Pair(0, pos + 1)
+            
+            elif msgtype == kClearEntries:
                 # knock out all previous assigns/updates!
-                for (auto& i : self.m_pending_outgoing)
-                    if not i:
+                for i, m in enumerate(self.m_pending_outgoing):
+                    if not m:
                         continue
         
-                    t = i.type()
-                    if (t == Message.kEntryAssign or t == Message.kEntryUpdate or
-                            t == Message.kFlagsUpdate or t == Message.kEntryDelete or
-                            t == Message.kClearEntries)
-                        i.reset()
+                    t = m.type
+                    if t in [kEntryAssign, kEntryUpdate, kFlagsUpdate,
+                             kEntryDelete, kClearEntries]:
+                        self.m_pending_outgoing[i] = None
         
-        
-                del self.m_pending_update[:]
+                self.m_pending_update.clear()
                 self.m_pending_outgoing.append(msg)
-                break
         
-            default:
+            else:
                 self.m_pending_outgoing.append(msg)
-                break
     
     def postOutgoing(self, keep_alive):
         with self.m_pending_mutex:
@@ -382,14 +388,13 @@ class NetworkConnection(object):
                 if (now - self.m_last_post) < 1.0:
                     return
         
-                self.m_outgoing.put([Message.keepAlive()])
+                self.m_outgoing.put((Message.keepAlive(),))
         
             else:
-                for o in self.m_pending_outgoing:
-                    self.m_outgoing.put(o)
+                self.m_outgoing.put(self.m_pending_outgoing)
                 
-                del self.m_pending_outgoing[:]
-                del self.m_pending_update[:]
+                self.m_pending_outgoing = []
+                self.m_pending_update.clear()
         
             self.m_last_post = now
     

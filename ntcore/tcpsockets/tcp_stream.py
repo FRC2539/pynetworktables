@@ -22,7 +22,8 @@ class ReadStream:
         if len(data) != sz:
             raise StreamEOF("end of file")
         return s.unpack(data)
-
+    
+    # XXX: need a close, and need a __bool__ method (or equivalent)
 
 
 class TCPStream(object):
@@ -114,6 +115,7 @@ class TCPStream(object):
         '''
     
     def close(self):
+        # TODO: should be locked?
         if self.m_sd:
             self.m_sd.shutdown(socket.SHUT_RDWR)
             self.m_sd.close()
