@@ -1,5 +1,4 @@
 '''----------------------------------------------------------------------------'''
-
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
 ''' must be accompanied by the FIRST BSD license file in the root directory of '''
@@ -18,6 +17,15 @@ from .tcpsockets.tcp_acceptor import TcpAcceptor
 from .tcpsockets.tcp_connector import TcpConnector
 
 from .support.threading_support import Condition
+
+from .constants import (
+    kClientHello,
+    kProtoUnsup,
+    kServerHello,
+    kServerHelloDone,
+    kClientHelloDone,
+    kEntryAssign,
+)
 
 import logging
 logger = logging.getLogger('nt')
@@ -131,8 +139,13 @@ class Dispatcher(object):
             self.m_server_acceptor.shutdown()
         
         # join threads, timeout
-        self.m_dispatch_thread.join()
-        self.m_clientserver_thread.join()
+        self.m_dispatch_thread.join(1)
+        if self.m_dispatch_thread.is_alive():
+            logger.warn("%s did not die", self.m_dispatch_thread.name)
+        
+        self.m_clientserver_thread.join(1)
+        if self.m_clientserver_thread.is_alive():
+            logger.warn("%s did not die", self.m_clientserver_thread.name)
         
         with self.m_user_mutex:
             conns = self.m_connections
@@ -175,7 +188,7 @@ class Dispatcher(object):
     
         with self.m_user_mutex:
             for conn in self.m_connections:
-                if conn.state() != NetworkConnection.kActive:
+                if conn.state() != NetworkConnection.State.kActive:
                     continue
         
                 conns.append(conn.info())
@@ -185,7 +198,7 @@ class Dispatcher(object):
     def notifyConnections(self, callback):
         with self.m_user_mutex:
             for conn in self.m_connections:
-                if conn.state() != NetworkConnection.kActive:
+                if conn.state() != NetworkConnection.State.kActive:
                     continue
     
                 self.m_notifier.notifyConnection(True, conn.info(), callback)
@@ -260,8 +273,8 @@ class Dispatcher(object):
                     continue
                 
                 state = conn.state()
-                if (state != NetworkConnection.kSynchronized and
-                    state != NetworkConnection.kActive):
+                if (state != NetworkConnection.State.kSynchronized and
+                    state != NetworkConnection.State.kActive):
                     continue
     
                 conn.queueOutgoing(msg)
@@ -294,7 +307,7 @@ class Dispatcher(object):
                 # reuse dead connection slots
                 for i in range(len(self.m_connections)):
                     c = self.m_connections[i]
-                    if c.state() == NetworkConnection.kDead:
+                    if c.state() == NetworkConnection.State.kDead:
                         c.stop()
                         self.m_connections[i] = conn
                         break
@@ -367,7 +380,7 @@ class Dispatcher(object):
             logger.debug("client: server disconnected before first response")
             return False
         
-        if msg.type == Message.kProtoUnsup:
+        if msg.type == kProtoUnsup:
             if msg.id == 0x0200:
                 self._clientReconnect(0x0200)
     
@@ -376,7 +389,7 @@ class Dispatcher(object):
         new_server = True
         if conn.proto_rev() >= 0x0300:
             # should be server hello; if not, disconnect.
-            if not msg.type == Message.kServerHello:
+            if not msg.type == kServerHello:
                 return False
     
             conn.set_remote_id(msg.str)
@@ -398,10 +411,10 @@ class Dispatcher(object):
                 logger.debug("received init str=%s id=%s seq_num=%s",
                              msg.str, msg.id. msg.seq_num_uid)
                 
-            if msg.type == Message.kServerHelloDone:
+            if msg.type == kServerHelloDone:
                 break
     
-            if not msg.type == Message.kEntryAssign:
+            if not msg.type == kEntryAssign:
                 # unexpected message
                 logger.debug("client: received message (%s) other than entry assignment during initial handshake",
                              msg.type)
@@ -434,7 +447,7 @@ class Dispatcher(object):
             logger.debug("server: client disconnected before sending hello")
             return False
     
-        if not msg.type == Message.kClientHello:
+        if not msg.type == kClientHello:
             logger.debug("server: client initial message was not client hello")
             return False
     
@@ -484,10 +497,10 @@ class Dispatcher(object):
                     logger.debug("server: disconnected waiting for initial entries")
                     return False
     
-                if msg.type == Message.kClientHelloDone:
+                if msg.type == kClientHelloDone:
                     break
     
-                if msg.type != Message.kEntryAssign:
+                if msg.type != kEntryAssign:
                     # unexpected message
                     logger.debug("server: received message (%s) other than entry assignment during initial handshake",
                                  msg.type)

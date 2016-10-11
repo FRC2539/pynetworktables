@@ -8,19 +8,16 @@ import binascii
 import base64
 import re
 
-try:
-    from configparser import RawConfigParser
-except ImportError:
-    from ConfigParser import RawConfigParser
-
 from .constants import *
 from .value import Value
+
+from .support.compat import RawConfigParser
 
 import logging
 logger = logging.getLogger('nt')
 
 
-PERSISTENT_SECTION = '[NetworkTables Storage 3.0]'
+PERSISTENT_SECTION = 'NetworkTables Storage 3.0'
 
 _key_bool = re.compile('boolean "(.+)"')
 _key_double = re.compile('double "(.+)"')
@@ -56,25 +53,30 @@ _table[ord('\r')] = '\\r'
 def _escape_string(s):
     return s.translate(_table)
 
-def load_entries(fp):
+def load_entries(fp, filename):
     
     entries = []
     
     parser = RawConfigParser()
     
     try:
-        parser.read(fp)
+        if hasattr(parser, 'read_file'):
+            parser.read_file(fp, filename)
+        else:
+            parser.readfp(fp, filename)
+    except IOError:
+        raise
     except Exception as e:
-        return 'Error reading persistent file: %s' % e
+        raise IOError('Error reading persistent file: %s' % e)
     
     try:
         cfg = parser[PERSISTENT_SECTION]
     except KeyError:
-        return "Persistent section not found"
+        raise IOError("Persistent section not found")
 
     value = None
     m = None
-
+    
     for k, v in cfg.items():
         
         # Reduces code duplication
@@ -104,7 +106,11 @@ def load_entries(fp):
         
         m = _key_string.match(k)
         if m:
-            value = Value.makeString(_unescape_string(v))
+            mm = _value_string.match(v)
+            if mm:
+                value = Value.makeString(_unescape_string(mm.group(1)))
+            else:
+                logger.warn("Unrecognized string value for %s", m.group(1))
             continue
         
         m = _key_raw.match(k)
@@ -118,16 +124,18 @@ def load_entries(fp):
         m = _key_bool_array.match(k)
         if m:
             bools = []
-            for vv in v.split(','):
-                vv = vv.strip()
-                if vv == 'true':
-                    bools.append(True)
-                elif vv == 'false':
-                    bools.append(False)
-                else:
-                    logger.warn("Unrecognized bool '%s' in bool array %s'", vv, m.group(1))
-                    bools = None
-                    break
+            arr = v.strip().split(',')
+            if arr != ['']:
+                for vv in arr:
+                    vv = vv.strip()
+                    if vv == 'true':
+                        bools.append(True)
+                    elif vv == 'false':
+                        bools.append(False)
+                    else:
+                        logger.warn("Unrecognized bool '%s' in bool array %s'", vv, m.group(1))
+                        bools = None
+                        break
                 
             if bools is not None:
                 value = Value.makeBooleanArray(bools)    
@@ -136,13 +144,15 @@ def load_entries(fp):
         m = _key_double_array.match(k)
         if m:
             doubles = []
-            for vv in v.split(','):
-                try:
-                    doubles.append(float(vv))
-                except ValueError:
-                    logger.warn("Unrecognized double '%s' in double array %s", vv, m.group(1))
-                    doubles = None
-                    break
+            arr = v.strip().split(',')
+            if arr != ['']:
+                for vv in arr:
+                    try:
+                        doubles.append(float(vv))
+                    except ValueError:
+                        logger.warn("Unrecognized double '%s' in double array %s", vv, m.group(1))
+                        doubles = None
+                        break
                 
             value = Value.makeDoubleArray(doubles)    
             continue
@@ -154,6 +164,13 @@ def load_entries(fp):
             strings = [_unescape_string(vv) for vv in _value_string.findall(v)]
             value = Value.makeStringArray(strings)
             continue
+        
+        logger.warn("Unrecognized type '%s'", k)
+        
+    if value:
+        entries.append((_unescape_string(m.group(1)), value))
+    
+    return entries
 
 
 def save_entries(fp, entries):
@@ -167,29 +184,30 @@ def save_entries(fp, entries):
         if not value:
             continue
         
-        t = value.type()
+        t = value.type
+        v = value.value 
         
         if t == NT_BOOLEAN:
             name = 'boolean "%s"' % _escape_string(name)
-            vrepr = 'true' if value.getboolean() else 'false'
+            vrepr = 'true' if v else 'false'
         elif t == NT_DOUBLE:
             name = 'double "%s"' % _escape_string(name)
-            vrepr = str(value.getDouble())
+            vrepr = str(v)
         elif t == NT_STRING:
             name = 'string "%s"' % _escape_string(name)
-            vrepr = '"%s"' % _escape_string(value.getString())
+            vrepr = '"%s"' % _escape_string(v)
         elif t == NT_RAW:
             name = 'raw "%s"' % _escape_string(name)
-            vrepr = base64.b64encode(value.getRaw())
+            vrepr = base64.b64encode(v).decode('ascii')
         elif t == NT_BOOLEAN_ARRAY:
             name = 'array boolean "%s"' % _escape_string(name)
-            vrepr = ','.join(['true' if v else 'false' for v in value.getBooleanArray()])
+            vrepr = ','.join(['true' if vv else 'false' for vv in v])
         elif t == NT_DOUBLE_ARRAY:
-            name = 'double "%s"' % _escape_string(name)
-            vrepr = ','.join([str(v) for v in value.getDoubleArray()])
+            name = 'array double "%s"' % _escape_string(name)
+            vrepr = ','.join([str(vv) for vv in v])
         elif t == NT_STRING_ARRAY:
-            name = 'string "%s"' % _escape_string(name)
-            vrepr = '","'.join([_escape_string(v) for v in value.getStringArray()])
+            name = 'array string "%s"' % _escape_string(name)
+            vrepr = '","'.join([_escape_string(vv) for vv in v])
             if vrepr:
                 vrepr = '"%s"' % vrepr
         else:

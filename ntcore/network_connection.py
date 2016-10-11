@@ -131,9 +131,14 @@ class NetworkConnection(object):
         # send an empty outgoing message set so the write thread terminates
         self.m_outgoing.put([])
         
-        # wait for threads to terminate, timeout        
-        self.m_write_thread.join(0.25)
-        self.m_read_thread.join(0.25)
+        # wait for threads to terminate, timeout
+        self.m_write_thread.join(1)
+        if self.m_write_thread.is_alive():
+            logger.warn("%s did not die", self.m_write_thread.name)
+            
+        self.m_read_thread.join(1)
+        if self.m_read_thread.is_alive():
+            logger.warn("%s did not die", self.m_write_thread.name)
         
         # clear queue
         try:

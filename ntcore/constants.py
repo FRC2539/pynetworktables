@@ -21,6 +21,10 @@ NT_NOTIFY_DELETE =      0x08 # deleted
 NT_NOTIFY_UPDATE =      0x10 # value changed
 NT_NOTIFY_FLAGS =       0x20 # flags changed
 
+# NetworkTables entry flags
+NT_PERSISTENT = 0x01
+
+
 # Message types
 kKeepAlive =        b'\x00'
 kClientHello =      b'\x01'

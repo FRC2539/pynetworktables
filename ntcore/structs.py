@@ -16,7 +16,7 @@ EntryInfo = namedtuple('EntryInfo', [
     'flags',
 
     # Timestamp of last change to entry (type or value).
-    'last_change',
+    #'last_change',
 ])
 
 

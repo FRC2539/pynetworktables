@@ -5,13 +5,41 @@
 ''' the project.                                                               '''
 '''----------------------------------------------------------------------------'''
 
+from collections import namedtuple
 import threading
 
-from .support.compat import Queue, Empty
+from .constants import (
+    NT_NOTIFY_LOCAL,
+    NT_NOTIFY_UPDATE,
+    NT_NOTIFY_FLAGS
+)
+
+from .support.compat import Queue
 
 import logging
 logger = logging.getLogger('nt')
 
+
+_EntryCallback = namedtuple('EntryCallback', [
+    'prefix',
+    'callback',
+    'flags'
+])
+
+_EntryNotification = namedtuple('EntryNotification', [
+    'is_entry',
+    'name',
+    'value',
+    'flags',
+    'only'
+])
+
+_ConnectionNotification = namedtuple('ConnectionNotification', [
+    'is_entry',
+    'connected',
+    'conn_info',
+    'only'
+])
 
 class _Escape(Exception):
     pass
@@ -32,146 +60,115 @@ class UidVector(dict):
         return idx
 
 
+_assign_both = NT_NOTIFY_UPDATE | NT_NOTIFY_FLAGS
+
+
 class Notifier(object):
 
     def __init__(self):
         self.m_mutex = threading.Lock()
         
+        self.m_active = False
         self.m_owner = None
         self.m_local_notifiers = False
         
         self.m_entry_listeners = UidVector()
         self.m_conn_listeners = UidVector()
         
-        self.m_entry_notificiations = queue.Queue()
-        self.m_conn_notifications = queue.Queue()
+        # In python we don't need multiple queues
+        self.m_notifications = Queue()
         
         self.m_on_start = None
         self.m_on_exit = None
-        
-        
-        
-        
-        #s_destroyed = False
-    
-    #def __del__(self):
-        #self.s_destroyed = True
-    
     
     def start(self):
         if not self.m_owner:
+            self.m_active = True
             self.m_owner = threading.Thread(target=self._thread_main, name='notifier_thread')
             self.m_owner.start()
     
     def stop(self):
-        self.m_owner.Stop()
+        if self.m_owner:
+            self.m_active = False
+            self.m_notifications.put(None)
+            self.m_owner.join()
+            self.m_owner = None
     
     def _thread_main(self):
         
         if self.m_on_start:
             self.m_on_start()
         
-        
         try:
             while self.m_active:
-                while (m_entry_notifications.empty() and self.m_conn_notifications.empty())
-                    self.m_cond.wait(lock)
-                    if not self.m_active:
-                        goto done
-        
-        
+                item = self.m_notifications.get()
+                    
+                if not self.m_active:
+                    raise _Escape() # goto done
         
                 # Entry notifications
-                while (not self.m_entry_notifications.empty())
-                    if not self.m_active:
-                        raise _Escape() # goto done
-        
-                    item = std.move(self.m_entry_notifications.front())
-                    self.m_entry_notifications.pop()
+                if item.is_entry:
         
                     if not item.value:
                         continue
         
-                    StringRef name(item.name)
-        
                     if item.only:
-                        # Don't hold mutex during callback execution!
-                        lock.release()
                         try:
-                            item.only(0, item.name, item.value, item.flags)
+                            # ntcore difference: no uid in callback
+                            item.only(item.name, item.value, item.flags)
                         except Exception:
                             logger.warn("Unhandled exception processing notify callback", exc_info=True)
-                            
-                        lock.acquire()
                         continue
-        
-        
-                    # Use index because iterator might get invalidated.
-                    for (std.size_t i=0; i<m_entry_listeners.size(); ++i)
-                        if not self.m_entry_listeners[i]:
-                            continue;    # removed
-        
-        
-                        # Flags must be within requested flag set for self listener.
+                    
+                    # Use copy because iterator might get invalidated.
+                    for listener in list(self.m_entry_listeners.values()):
+                        
+                        # Flags must be within requested flag set for this listener.
                         # Because assign messages can result in both a value and flags update,
                         # we handle that case specially.
-                        unsigned listen_flags = self.m_entry_listeners[i].flags
-                        unsigned flags = item.flags
-                        unsigned assign_both = NT_NOTIFY_UPDATE | NT_NOTIFY_FLAGS
-                        if (flags & assign_both) == assign_both:
-                            if (listen_flags & assign_both) == 0:
+                        listen_flags = listener.flags
+                        flags = item.flags
+                        name = item.name
+                        
+                        if (flags & _assign_both) == _assign_both:
+                            if (listen_flags & _assign_both) == 0:
                                 continue
         
-                            listen_flags &= ~assign_both
-                            flags &= ~assign_both
+                            listen_flags &= ~_assign_both
+                            flags &= ~_assign_both
         
                         if (flags & ~listen_flags) != 0:
                             continue
-        
-        
+                        
                         # must match prefix
-                        if not name.startswith(m_entry_listeners[i].prefix):
+                        if not name.startswith(listener.prefix):
                             continue
-        
-        
-                        # make a copy of the callback so we can safely release the mutex
-                        callback = self.m_entry_listeners[i].callback
-        
-                        # Don't hold mutex during callback execution!
-                        lock.unlock()
-                        callback(i+1, name, item.value, item.flags)
-                        lock.lock()
-        
-        
-        
+                        
+                        try:
+                            # ntcore difference: no uid in callback
+                            listener.callback(item.name, item.value, item.flags)
+                        except Exception:
+                            logger.warn("Unhandled exception processing notify callback", exc_info=True)
+                
                 # Connection notifications
-                while (not self.m_conn_notifications.empty())
-                    if not self.m_active:
-                        raise _Escape() # goto done
-        
-                    item = std.move(m_conn_notifications.front())
-                    self.m_conn_notifications.pop()
-        
+                else:
                     if item.only:
-                        # Don't hold mutex during callback execution!
-                        lock.unlock()
-                        item.only(0, item.connected, item.conn_info)
-                        lock.lock()
+                        try:
+                            item.only(0, item.connected, item.conn_info)
+                        except Exception:
+                            logger.warn("Unhandled exception processing notify callback", exc_info=True)
                         continue
+                    
+                    # Use copy because iterator might get invalidated.
+                    for listener in list(self.m_conn_listeners.values()):
+                        try:
+                            # ntcore difference: no uid in callback
+                            listener.callback(item.connected, item.conn_info)
+                        except Exception:
+                            logger.warn("Unhandled exception processing notify callback", exc_info=True)
         
-        
-                    # Use index because iterator might get invalidated.
-                    for (std.size_t i=0; i<m_conn_listeners.size(); ++i)
-                        if not self.m_conn_listeners[i]:
-                            continue;    # removed
-        
-                        callback = self.m_conn_listeners[i]
-                        # Don't hold mutex during callback execution!
-                        lock.unlock()
-                        callback(i+1, item.connected, item.conn_info)
-                        lock.lock()
         except _Escape:
-            pass # goto substitute
+            pass # because goto doesn't exist in python
         except Exception:
             logger.exception("Unhandled exception in notifier thread")
         
@@ -183,57 +180,41 @@ class Notifier(object):
     
     def addEntryListener(self, prefix, callback, flags):
         self.start()
-        thr = self.m_owner.GetThread()
         if (flags & NT_NOTIFY_LOCAL) != 0:
             self.m_local_notifiers = True
     
-        return thr.m_entry_listeners.emplace_back(prefix, callback, flags)
+        return self.m_entry_listeners.add(_EntryCallback(prefix, callback, flags))
     
+    def removeEntryListener(self, entry_listener_uid):
+        try:
+            del self.m_entry_listeners[entry_listener_uid]
+        except KeyError:
+            pass
     
-    def removeEntryListener(self, int entry_listener_uid):
-        thr = self.m_owner.GetThread()
-        if not thr:
-            return
-    
-        thr.m_entry_listeners.erase(entry_listener_uid)
-    
-    
-    def notifyEntry(self, name, value, flags, only):
-    
-    void Notifier.notifyEntry(StringRef name, value,
-                               unsigned int flags, only)
+    def notifyEntry(self, name, value, flags, only=None):
         # optimization: don't generate needless local queue entries if we have
         # no local listeners (as this is a common case on the server side)
         if (flags & NT_NOTIFY_LOCAL) != 0 and not self.m_local_notifiers:
             return
     
-        thr = self.m_owner.GetThread()
-        if not thr:
+        if not self.m_owner:
             return
     
-        thr.m_entry_notifications.emplace(name, value, flags, only)
-        thr.m_cond.notify_one()
+        self.m_notifications.put(_EntryNotification(True, name, value, flags, only))
+    
     
     def addConnectionListener(self, callback):
         self.start()
-        thr = self.m_owner.GetThread()
-        
-        # returns some arbitrary integer..
-        return thr.m_conn_listeners.emplace_back(callback)
+        return self.m_conn_listeners.add(callback)
     
-    
-    def removeConnectionListener(self, int conn_listener_uid):
-        thr = self.m_owner.GetThread()
-        if not thr:
-            return
-    
-        thr.m_conn_listeners.erase(conn_listener_uid)
+    def removeConnectionListener(self, conn_listener_uid):
+        try:
+            del self.m_conn_listeners[conn_listener_uid]
+        except KeyError:
+            pass
     
     def notifyConnection(self, connected, conn_info, only):
-        thr = self.m_owner.GetThread()
-        if not thr:
+        if not self.m_owner:
             return
-    
-        thr.m_conn_notifications.emplace(connected, conn_info, only)
-        thr.m_cond.notify_one()
-    
+        
+        self.m_notifications.put(_ConnectionNotification(False, connected, conn_info, only))

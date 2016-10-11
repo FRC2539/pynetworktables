@@ -7,15 +7,11 @@
 
 from collections import namedtuple
 
-try:
-    from queue import Queue, Empty
-except ImportError:
-    from Queue import Queue, Empty
-
 import threading
 
 from .message import Message
 from .structs import RpcCallInfo
+from .support.compat import Queue, Empty
 
 import logging
 logger = logging.getLogger('nt')
@@ -47,8 +43,8 @@ class RpcServer(object):
         
         self.m_call_queue = Queue()
         
-    def __del__(self):
-        self.stop()
+    #def __del__(self):
+    #    self.stop()
 
     def setOnStart(self, on_start):
         self.m_on_start = on_start
@@ -58,12 +54,18 @@ class RpcServer(object):
    
     def start(self):
         if not self.m_call_thread:
-            self.m_call_thread = threading.Thread(target=self._callThread)
+            self.m_call_thread = threading.Thread(target=self._callThread,
+                                                  name='nt-rpc-thread')
             self.m_call_thread.start()
              
     def stop(self):
-        self.m_terminating = True
-        self.m_call_queue.put(None)
+        if self.m_call_thread:
+            self.m_terminating = True
+            self.m_call_queue.put(None)
+            
+            self.m_call_thread.join(1)
+            if self.m_call_thread.is_alive():
+                logger.warn("%s did not die", self.m_call_thread.name)
     
     def processRpc(self, name, msg, func, conn_id, send_response):
         call = RpcCall(name, msg, func, conn_id, send_response)
@@ -112,7 +114,7 @@ class RpcServer(object):
         if self.m_on_start:
             self.m_on_start()
         
-        while self.m_active:
+        while not self.m_terminating:
             
             item = self.m_call_queue.get()
             if not item:

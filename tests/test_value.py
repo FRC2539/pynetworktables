@@ -6,7 +6,7 @@
 '''----------------------------------------------------------------------------'''
 
 
-from ntcore.structs import *
+from ntcore.constants import *
 from ntcore.value import Value
 
 
@@ -41,13 +41,13 @@ def test_String():
 
 
 def test_Raw():
-    v = Value.makeRaw("hello")
+    v = Value.makeRaw(b"hello")
     assert NT_RAW == v.type
-    assert "hello" == v.value
+    assert b"hello" == v.value
     
-    v = Value.makeRaw("goodbye")
+    v = Value.makeRaw(b"goodbye")
     assert NT_RAW == v.type
-    assert "goodbye" == v.value
+    assert b"goodbye" == v.value
     
 
 def test_BooleanArray():

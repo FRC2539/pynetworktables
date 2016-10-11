@@ -10,22 +10,46 @@ import threading
 
 from monotonic import monotonic
 
+from .message import Message
 from .network_connection import NetworkConnection
 from .persistence import load_entries, save_entries
+from .structs import EntryInfo
 from .value import Value
 
 from .support.file_support import file_replace
 from .support.lists import ensure_id_exists
+
+from .constants import (
+    kEntryAssign,
+    kEntryUpdate,
+    kFlagsUpdate,
+    kEntryDelete,
+    kClearEntries,
+    kExecuteRpc,
+    kRpcResponse,
+    
+    NT_UNASSIGNED,
+    NT_PERSISTENT,
+    
+    NT_NOTIFY_IMMEDIATE,
+    NT_NOTIFY_LOCAL,
+    NT_NOTIFY_NEW,
+    NT_NOTIFY_DELETE,
+    NT_NOTIFY_UPDATE,
+    NT_NOTIFY_FLAGS
+)
 
 import logging
 logger = logging.getLogger('nt')
 
 
 
-class Entry(object):
-    __slots__ = ['name', 'value', 'flags', 'id', 'seq_num', 'rpc_callback']
+class _Entry(object):
+    __slots__ = ['name', 'value', 'flags',
+                 'id', 'seq_num', 'rpc_callback',
+                 'rpc_call_uid']
     
-    def __init__(self, name, value=None, flags=0, seq_num=None):
+    def __init__(self, name, value=None, flags=0, seq_num=0):
         # We redundantly store the name so that it's available when accessing the
         # raw Entry* via the ID map.
         self.name = name
@@ -65,6 +89,12 @@ class Entry(object):
             return (other - seq_num) > 32768
         else:
             return True
+        
+    def __repr__(self):
+        return "<_Entry name='%s' value=%s flags=%s id=%s seq_num=%s rpc_callback=%s rpc_call_uid=%s" % \
+            (self.name, self.value, self.flags, self.id,
+             self.seq_num, self.rpc_callback, self.rpc_call_uid)
+
 
 class Storage(object):
     
@@ -93,19 +123,23 @@ class Storage(object):
         self.m_server = True
         
         self._process_fns = {
-            Message.kEntryAssign:   self._processEntryAssign,
-            Message.kEntryUpdate:   self._processEntryUpdate,
-            Message.kFlagsUpdate:   self._processFlagsUpdate,
-            Message.kEntryDelete:   self._processEntryDelete,
-            Message.kClearEntries:  self._processClearEntries,
-            Message.kExecuteRpc:    self._processExecuteRpc,
-            Message.kRpcResponse:   self._processRpcResponse
+            kEntryAssign:   self._processEntryAssign,
+            kEntryUpdate:   self._processEntryUpdate,
+            kFlagsUpdate:   self._processFlagsUpdate,
+            kEntryDelete:   self._processEntryDelete,
+            kClearEntries:  self._processClearEntries,
+            kExecuteRpc:    self._processExecuteRpc,
+            kRpcResponse:   self._processRpcResponse
         }
     
+    
     #def __del__(self):
-    #    self.m_terminating = True
-    #    with self.m_rpc_results_cond:
-    #        self.m_rpc_results_cond.notify_all()
+    #    self.stop()
+    
+    def stop(self):
+        self.m_terminating = True
+        with self.m_rpc_results_cond:
+            self.m_rpc_results_cond.notify_all()
     
     def setOutgoing(self, queue_outgoing, server):
         with self.m_mutex:
@@ -132,18 +166,18 @@ class Storage(object):
         #       not needed here as conn == weak_conn
         fn = self._process_fns.get(msg.type)
         if fn:
-            queue_outgoing = None
+            
             with self.m_mutex:
-                outgoing = fn(msg, conn)
-                if outgoing:
-                    queue_outgoing = self.m_queue_outgoing
+                queue_outgoing = self.m_queue_outgoing
+                outgoing = [] if queue_outgoing else None
+                fn(msg, conn, outgoing)
                     
             # this has to happen outside the lock
-            if queue_outgoing:
+            if outgoing:
                 for o in outgoing:
                     queue_outgoing(o)
     
-    def _processEntryAssign(self, msg, conn):
+    def _processEntryAssign(self, msg, conn, outgoing):
 
         msg_id = msg.id
         name = msg.str
@@ -160,7 +194,7 @@ class Storage(object):
                     return
                 
                 # create it locally
-                entry = Entry(name)
+                entry = _Entry(name)
                 msg_id = len(self.m_idmap)
                 self.m_entries[name] = entry
                 
@@ -177,11 +211,9 @@ class Storage(object):
                 self.m_notifier.notifyEntry(name, entry.value, NT_NOTIFY_NEW)
 
                 # send the assignment to everyone (including the originator)
-                if self.m_queue_outgoing:
-                    queue_outgoing = self.m_queue_outgoing
+                if outgoing:
                     outmsg = Message.entryAssign(name, msg_id, entry.seq_num, msg.value, msg.flags)
-                    lock.unlock()
-                    queue_outgoing(outmsg, None, None)
+                    outgoing.append((outmsg, None, None))
 
                 return
 
@@ -208,7 +240,7 @@ class Storage(object):
                 if not entry:
                     # didn't exist at all (rather than just being a response to a
                     # id assignment request)
-                    entry = Entry(name)
+                    entry = _Entry(name)
                     entry.value = msg.value
                     entry.flags = msg.flags
                     entry.id = msg_id
@@ -224,14 +256,9 @@ class Storage(object):
 
                 # if the received flags don't match what we sent, most likely
                 # updated flags locally in the interim; send flags update message.
-                if msg.flags != entry.flags:
-                    queue_outgoing = self.m_queue_outgoing
+                if msg.flags != entry.flags and outgoing:
                     outmsg = Message.flagsUpdate(msg_id, entry.flags)
-                    lock.unlock()
-                    queue_outgoing(outmsg, None, None)
-                    lock.lock()
-
-
+                    outgoing.append((outmsg, None, None))
 
 
         # common client and server handling
@@ -239,21 +266,17 @@ class Storage(object):
         # already exists; ignore if sequence number not higher than local
         seq_num = msg.seq_num_uid
         if entry.isSeqNewerThan(seq_num):
-            if may_need_update:
-                queue_outgoing = self.m_queue_outgoing
+            if may_need_update and outgoing:
                 outmsg = Message.entryUpdate(entry.id, entry.seq_num,
                                                    entry.value)
-                lock.unlock()
-                queue_outgoing(outmsg, None, None)
-
+                outgoing.append((outmsg, None, None))
+            
             return
-
 
         # sanity check: name should match id
         if msg.str != entry.name:
             logger.debug("entry assignment for same id with different name?")
             return
-
 
         notify_flags = NT_NOTIFY_UPDATE
 
@@ -284,14 +307,12 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and self.m_queue_outgoing:
-            queue_outgoing = self.m_queue_outgoing
+        if self.m_server and outgoing:
             outmsg = Message.entryAssign(entry.name, msg_id, msg.seq_num_uid,
                                          msg.value, entry.flags)
-            lock.unlock()
-            queue_outgoing(outmsg, None, conn)
+            outgoing.append((outmsg, None, conn))
     
-    def _processEntryUpdate(self, msg, conn):
+    def _processEntryUpdate(self, msg, conn, outgoing):
         msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
@@ -321,12 +342,10 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and self.m_queue_outgoing:
-            queue_outgoing = self.m_queue_outgoing
-            lock.unlock()
-            queue_outgoing(msg, None, conn)
+        if self.m_server and outgoing:
+            outgoing.append((msg, None, conn))
     
-    def _processFlagsUpdate(self, msg, conn):
+    def _processFlagsUpdate(self, msg, conn, outgoing):
         msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
@@ -354,12 +373,10 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and self.m_queue_outgoing:
-            queue_outgoing = self.m_queue_outgoing
-            lock.unlock()
-            queue_outgoing(msg, None, conn)
+        if self.m_server and outgoing:
+            outgoing.append((msg, None, conn))
     
-    def _processEntryDelete(self, msg, conn):
+    def _processEntryDelete(self, msg, conn, outgoing):
         msg_id = msg.id
         if msg_id >= len(self.m_idmap) or not self.m_idmap[msg_id]:
             # ignore arbitrary entry updates
@@ -388,23 +405,19 @@ class Storage(object):
         
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and self.m_queue_outgoing:
-            queue_outgoing = self.m_queue_outgoing
-            lock.unlock()
-            queue_outgoing(msg, None, conn)
+        if self.m_server and outgoing:
+            outgoing.append((msg, None, conn))
     
-    def _processClearEntries(self, msg, conn):
+    def _processClearEntries(self, msg, conn, outgoing):
         # update local
         self._deleteAllEntriesImpl()
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and self.m_queue_outgoing:
-            queue_outgoing = self.m_queue_outgoing
-            lock.unlock()
-            queue_outgoing(msg, None, conn)
+        if self.m_server and outgoing:
+            outgoing.append((msg, None, conn))
     
-    def _processExecuteRpc(self, msg, conn):
+    def _processExecuteRpc(self, msg, conn, outgoing):
         if not self.m_server:
             return    # only process on server
 
@@ -423,7 +436,7 @@ class Storage(object):
         self.m_rpc_server.processRpc(entry.name, msg, entry.rpc_callback,
                                      conn.uid(), conn.queueOutgoing)
     
-    def _processRpcResponse(self, msg, conn):
+    def _processRpcResponse(self, msg, conn, outgoing):
         if self.m_server:
             return    # only process on client
         
@@ -432,7 +445,7 @@ class Storage(object):
     
     def getInitialAssignments(self, conn, msgs):
         with self.m_mutex:
-            conn.set_state(NetworkConnection.kSynchronized)
+            conn.set_state(NetworkConnection.State.kSynchronized)
             for entry in self.m_entries.values():
                 msgs.append(Message.entryAssign(entry.name, entry.id,
                                                 entry.seq_num,
@@ -443,7 +456,7 @@ class Storage(object):
             if self.m_server:
                 return    # should not do this on server
         
-            conn.set_state(NetworkConnection.kSynchronized)
+            conn.set_state(NetworkConnection.State.kSynchronized)
         
             update_msgs = []
         
@@ -456,7 +469,7 @@ class Storage(object):
         
             # apply assignments
             for msg in msgs:
-                if msg.type != Message.kEntryAssign:
+                if msg.type != kEntryAssign:
                     logger.debug("client: received non-entry assignment request?")
                     continue
         
@@ -471,7 +484,7 @@ class Storage(object):
                 entry = self.m_entries.get(name)
                 if not entry:
                     # doesn't currently exist
-                    entry = Entry(name, msg.value, msg.flags, seq_num)
+                    entry = _Entry(name, msg.value, msg.flags, seq_num)
                     self.m_entries[name] = entry
                     
                     # notify
@@ -514,7 +527,6 @@ class Storage(object):
                                                     entry.value, entry.flags))
         
             queue_outgoing = self.m_queue_outgoing
-            lock.unlock()
         
         # Outside of mutex
         for msg in update_msgs:
@@ -524,7 +536,7 @@ class Storage(object):
         with self.m_mutex:
             e = self.m_entries.get(name)
             if e:
-                return e.value.value
+                return e.value
     
     def setDefaultEntryValue(self, name, value):
         if not value:
@@ -546,7 +558,8 @@ class Storage(object):
         
             # if we've gotten here, does not exist, we can write it.
             # don't need to compare old value as we know it will assign
-            entry = Entry(name, value)
+            entry = _Entry(name, value)
+            self.m_entries[name] = entry
             
             # if we're the server, an id if it doesn't have one
             if self.m_server and entry.id == 0xffff:
@@ -554,15 +567,15 @@ class Storage(object):
                 self.m_idmap.append(entry)
         
             # notify (for local listeners)
-            if self.m_notifier.local_notifiers():
+            if self.m_notifier.m_local_notifiers:
                 # always a new entry if we got this far
                 self.m_notifier.notifyEntry(name, value, NT_NOTIFY_NEW | NT_NOTIFY_LOCAL)
         
             # generate message
-            if not self.m_queue_outgoing:
-                return True
-        
             queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
+                return True
+            
             msg = Message.entryAssign(name, entry.id, entry.seq_num,
                                             entry.value, entry.flags)
             
@@ -580,11 +593,13 @@ class Storage(object):
         with self.m_mutex:
             entry = self.m_entries.get(name)
             if not entry:
-                entry = Entry(name)
-            
-            old_value = entry.value
-            if old_value and old_value.type != value.type:
-                return False    # error on type mismatch
+                old_value = None
+                entry = _Entry(name)
+                self.m_entries[name] = entry
+            else:
+                old_value = entry.value
+                if old_value and old_value.type != value.type:
+                    return False    # error on type mismatch
         
             entry.value = value
         
@@ -598,7 +613,7 @@ class Storage(object):
                 self.m_persistent_dirty = True
             
             # notify (for local listeners)
-            if self.m_notifier.local_notifiers():
+            if self.m_notifier.m_local_notifiers:
                 if not old_value:
                     self.m_notifier.notifyEntry(name, value, NT_NOTIFY_NEW | NT_NOTIFY_LOCAL)
         
@@ -606,10 +621,10 @@ class Storage(object):
                     self.m_notifier.notifyEntry(name, value, NT_NOTIFY_UPDATE | NT_NOTIFY_LOCAL)
             
             # generate message
-            if not self.m_queue_outgoing:
+            queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
                 return True
         
-            queue_outgoing = self.m_queue_outgoing
             msg = None
             
             if not old_value:
@@ -639,13 +654,15 @@ class Storage(object):
         with self.m_mutex:
             entry = self.m_entries.get(name)
             if not entry:
-                entry = Entry(name)
-                self.m_entries.put(entry)
-        
-            old_value = entry.value
+                old_value = None
+                entry = _Entry(name)
+                self.m_entries[name] = entry
+            else:
+                old_value = entry.value
+                if old_value and old_value == value:
+                    return
+                
             entry.value = value
-            if old_value and old_value == value:
-                return
             
             # if we're the server, an id if it doesn't have one
             if self.m_server and entry.id == 0xffff:
@@ -657,7 +674,7 @@ class Storage(object):
                 self.m_persistent_dirty = True
             
             # notify (for local listeners)
-            if self.m_notifier.local_notifiers():
+            if self.m_notifier.m_local_notifiers:
                 if not old_value:
                     self.m_notifier.notifyEntry(name, value, NT_NOTIFY_NEW | NT_NOTIFY_LOCAL)
         
@@ -665,10 +682,10 @@ class Storage(object):
                     self.m_notifier.notifyEntry(name, value, NT_NOTIFY_UPDATE | NT_NOTIFY_LOCAL)
             
             # generate message
-            if not self.m_queue_outgoing:
-                return
-        
             queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
+                return
+            
             msg = None
             
             if not old_value or old_value.type != value.type:
@@ -709,10 +726,10 @@ class Storage(object):
             self.m_notifier.notifyEntry(name, entry.value, NT_NOTIFY_FLAGS | NT_NOTIFY_LOCAL)
         
             # generate message
-            if not self.m_queue_outgoing:
-                return
-        
             queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
+                return
+            
             entry_id = entry.id
             
         # don't send an update if we don't have an assigned id yet
@@ -721,12 +738,12 @@ class Storage(object):
     
     def getEntryFlags(self, name):
         with self.m_mutex:
-            entry = self.entries.get(name)
+            entry = self.m_entries.get(name)
             return entry.flags if entry else 0
     
     def deleteEntry(self, name):
         with self.m_mutex:
-            entry = self.m_entries.pop(name)
+            entry = self.m_entries.pop(name, None)
             if not entry:
                 return
         
@@ -763,14 +780,14 @@ class Storage(object):
             entry = self.m_entries.get(k)
             if not entry.isPersistent():
                 # notify it's being deleted
-                if self.m_notifier.local_notifiers():
+                if self.m_notifier.m_local_notifiers:
                     self.m_notifier.notifyEntry(k, entry,
                                                 NT_NOTIFY_DELETE | NT_NOTIFY_LOCAL)
     
                 # remove it from idmap
                 if entry.id != 0xffff:
                     self.m_idmap[entry.id] = None
-            else:
+            
                 # Delete it
                 self.m_entries.pop(k)
     
@@ -782,16 +799,16 @@ class Storage(object):
             self._deleteAllEntriesImpl()
         
             # generate message
-            if not self.m_queue_outgoing:
-                return
-        
             queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
+                return
         
         queue_outgoing(Message.clearEntries(), None, None)
     
     def getEntryInfo(self, prefix, types):
         with self.m_mutex:
             infos = []
+            types = types if isinstance(types, int) else types[0]
             for k, entry in self.m_entries.items():
                 if not k.startswith(prefix):
                     continue
@@ -800,10 +817,10 @@ class Storage(object):
                 if not value:
                     continue
         
-                if types != 0 and (types & value.type) == 0:
+                if types != 0 and (types & value.type[0]) == 0:
                     continue
         
-                info = EntryInfo(entry.name, value.type, entry.flags, value.last_change())
+                info = EntryInfo(entry.name, value.type, entry.flags)
                 infos.append(info)
         
             return infos
@@ -823,10 +840,11 @@ class Storage(object):
         
         # copy values into storage as quickly as possible so lock isn't held
         with self.m_mutex:
+            queue_outgoing = self.m_queue_outgoing
             for name, value in entries:
                 entry = self.m_entries.get(name)
                 if not entry:
-                    entry = Entry(name)
+                    entry = _Entry(name)
                     self.m_entries[name] = entry
     
                 old_value = entry.value
@@ -841,7 +859,7 @@ class Storage(object):
                     self.m_idmap.append(entry)
                 
                 # notify (for local listeners)
-                if self.m_notifier.local_notifiers():
+                if self.m_notifier.m_local_notifiers:
                     if not old_value:
                         self.m_notifier.notifyEntry(name, value,
                                                     NT_NOTIFY_NEW | NT_NOTIFY_LOCAL)
@@ -852,7 +870,7 @@ class Storage(object):
     
                         self.m_notifier.notifyEntry(name, value, notify_flags)
     
-                if not self.m_queue_outgoing:
+                if not queue_outgoing:
                     continue    # shortcut
     
                 entry.increment_seqnum()
@@ -865,14 +883,10 @@ class Storage(object):
                 elif entry.id != 0xffff:
                     # don't send an update if we don't have an assigned id yet
                     if old_value != value:
-                        msgs.emplace_back(Message.entryUpdate(entry.id, entry.seq_num, value))
+                        msgs.append(Message.entryUpdate(entry.id, entry.seq_num, value))
                     if not was_persist:
-                        msgs.emplace_back(Message.flagsUpdate(entry.id, entry.flags))
+                        msgs.append(Message.flagsUpdate(entry.id, entry.flags))
             
-            queue_outgoing = None
-            if self.m_queue_outgoing:
-                queue_outgoing = self.m_queue_outgoing
-                
         if queue_outgoing:
             for msg in msgs:
                 queue_outgoing(msg, None, None)
@@ -882,58 +896,64 @@ class Storage(object):
         # copy values out of storage as quickly as possible so lock isn't held
         with self.m_mutex:
             if periodic and self.m_persistent_dirty:
-                return
+                return False
             
-            entries = [(entry.name, entry.value) for entry in self.m_entries \
+            entries = [(entry.name, entry.value) for entry in self.m_entries.values() \
                        if entry.isPersistent()]
         
         # sort in name order
         entries.sort()
         return entries
     
-    def loadPersistent(self, filename):
+    def loadPersistent(self, filename=None, fp=None):
         try:
-            with open(filename, 'r') as fp:
-                entries = load_entries(fp)
+            if fp:
+                entries = load_entries(fp, filename if filename else '<string>')
+            else:
+                with open(filename, 'r') as fp:
+                    entries = load_entries(fp, filename)
         except IOError as e:
             return 'Error reading file: %s' % e
         else:
             self._putPersistentEntries(entries)
+            return True
     
-    def savePersistent(self, filename, periodic):
+    def savePersistent(self, filename=None, periodic=False, fp=None):
         with self.m_persistence_save_lock:
             entries = self._getPersistentEntries(periodic)
-            if not entries:
+            if entries is False:
                 return
         
             # Going to not use tempfile to keep compatibility with ntcore,
             # as having to cleanup temp files on the RIO is probably bad
-        
-            tmp = '%s.tmp' % filename
-            bak = '%s.bak' % filename
-            
-            try:
-                with open(tmp, 'w') as fp:
-                    save_entries(fp, entries)
-                    os.fsync(fp.fileno())
-            except IOError as e:
-                return 'Error writing file: %s' % e
-            
-            try:
-                file_replace(filename, bak)
-            except OSError:
-                pass # ignored
+            if fp:
+                save_entries(fp, entries)
+            else:
+                tmp = '%s.tmp' % filename
+                bak = '%s.bak' % filename
                 
-            try:
-                file_replace(tmp, filename)
-            except OSError as e:
                 try:
-                    # try to restore backup
-                    file_replace(bak, filename)
+                    with open(tmp, 'w') as fp:
+                        save_entries(fp, entries)
+                        os.fsync(fp.fileno())
+                except IOError as e:
+                    return 'Error writing file: %s' % e
+                
+                try:
+                    file_replace(filename, bak)
                 except OSError:
-                    pass
+                    pass # ignored
                     
-                return 'Could not rename temp file to real file: %s' % e
+                try:
+                    file_replace(tmp, filename)
+                except OSError as e:
+                    try:
+                        # try to restore backup
+                        file_replace(bak, filename)
+                    except OSError:
+                        pass
+                        
+                    return 'Could not rename temp file to real file: %s' % e
             
             self.m_persistent_dirty = False
     
@@ -947,7 +967,7 @@ class Storage(object):
             
             entry = self.m_entries.get(name)
             if not entry:
-                entry = Entry(name)
+                entry = _Entry(name)
             
             old_value = entry.value
             value = Value.makeRpc(defn)
@@ -996,7 +1016,7 @@ class Storage(object):
             
             entry = self.m_entries.get(name)
             if not entry:
-                entry = Entry(name)
+                entry = _Entry(name)
             
             old_value = entry.value
             value = Value.makeRpc(defn)
@@ -1014,10 +1034,10 @@ class Storage(object):
                 self.m_idmap.append(entry)
             
             # generate message
-            if not self.m_queue_outgoing:
-                return
-        
             queue_outgoing = self.m_queue_outgoing
+            if not queue_outgoing:
+                return
+            
             msg = None
             
             if not old_value or old_value.type != value.type:
