@@ -1,5 +1,7 @@
 
-from networktables2 import BooleanArray, NumberArray, StringArray
+from .networktables import NetworkTables
+
+# Deprecated, will be removed in 2018
 from .networktable import NetworkTable
 
 try:

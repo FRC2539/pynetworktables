@@ -157,6 +157,8 @@ class Dispatcher(object):
     
     def setUpdateRate(self, interval):
         # don't allow update rates faster than 10 ms or slower than 1 second
+        interval = float(interval)
+        
         if interval < 0.01:
             interval = 0.01
     

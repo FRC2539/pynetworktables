@@ -3,7 +3,7 @@ from __future__ import print_function
 
 from os.path import dirname, exists, join
 import sys, subprocess
-from setuptools import setup
+from setuptools import find_packages, setup
 
 setup_dir = dirname(__file__)
 git_dir = join(setup_dir, '.git')
@@ -46,6 +46,6 @@ setup(
     author_email='robotpy@googlegroups.com',
     url='https://github.com/robotpy/pynetworktables',
     keywords='frc first robotics wpilib networktables',
-    packages=[base_package, 'networktables2', 'ntcore'],
+    packages=find_packages(exclude='tests'),
     install_requires=['monotonic'],
     )
