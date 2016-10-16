@@ -84,17 +84,23 @@ class NetworkTables:
         with cls._staticMutex:
             cls._checkInit()
             
+            if server is not None:
+                cls._is_server = True
+                cls.ipAddress = server
             
+            if cls._is_server:
+                cls._api.startServer(cls._persistentFilename, "", cls.port)
+            else:
+                cls._api.startClient(cls.ipAddress, cls.port)
+
+            cls._running = True
             
-            cls._staticProvider = NetworkTableProvider(
-                    cls._mode_fn(cls.ipAddress,
-                                          cls.port))
-            
-            if cls._queuedAutoUpdateValues:
-                q = cls._queuedAutoUpdateValues
-                cls._queuedAutoUpdateValues = None
-                for args in q:
-                    cls.getGlobalAutoUpdateValue(*args)
+            # TODO
+            #if cls._queuedAutoUpdateValues:
+            #    q = cls._queuedAutoUpdateValues
+            #    cls._queuedAutoUpdateValues = None
+            #    for args in q:
+            #        cls.getGlobalAutoUpdateValue(*args)    
     
     @classmethod
     def shutdown(cls):
@@ -123,7 +129,7 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._mode_fn = classmethod(_create_client_node)
+            cls._is_server = False
             
     @classmethod
     def setServerMode(cls):
@@ -133,7 +139,7 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._mode_fn = classmethod(_create_server_node)
+            cls._is_server = True
     
     @classmethod
     def setTeam(cls, team):
@@ -144,7 +150,6 @@ class NetworkTables:
         
         .. warning:: This must be called before :meth:`initalize` or :meth:`getTable`
         """
-        #cls.setIPAddress("10.%d.%d.2" % divmod(team, 100))
         cls.setIPAddress('roboRIO-%d-FRC.local' % team)
 
     @classmethod

@@ -6,6 +6,19 @@ __all__ = ["NetworkTable"]
 # TODO: in 2018, remove this circular import
 from .networktables import NetworkTables as _NT
 
+from ntcore.constants import (
+    NT_BOOLEAN,
+    NT_DOUBLE,
+    NT_STRING,
+    NT_RAW,
+    NT_BOOLEAN_ARRAY,
+    NT_DOUBLE_ARRAY,
+    NT_STRING_ARRAY,
+    
+    NT_PERSISTENT
+)
+
+from ntcore.support.compat import stringtype
 from ntcore.value import Value
 
 class _defaultValueSentry:
@@ -68,11 +81,11 @@ class NetworkTable:
     isServer = _NT.isServer
     
     
-    def __init__(self, path, provider):
+    def __init__(self, path, api):
         self.path = path
-        self.provider = provider
-        self.node = provider.getNode()
-        self.connectionListenerMap = {}
+        self._path = path + self.PATH_SEPARATOR
+        self._api = api
+        
         self.listenerMap = {}
 
     def __str__(self):
@@ -101,10 +114,10 @@ class NetworkTable:
         adapters = self.listenerMap.setdefault(listener, [])
         if key is not None:
             adapter = NetworkTableKeyListenerAdapter(
-                    key, self.path + key, self, listener)
+                    key, self._path + key, self, listener)
         else:
             adapter = NetworkTableListenerAdapter(
-                    self.path+self.PATH_SEPARATOR, self, listener)
+                    self._path+self.PATH_SEPARATOR, self, listener)
         adapters.append(adapter)
         self.node.addTableListener(adapter, immediateNotify)
 
@@ -122,7 +135,7 @@ class NetworkTable:
                      currently sure if deadlocks will occur
         '''
         adapters = self.listenerMap.setdefault(listener, [])
-        adapter = NetworkTableSubListenerAdapter(self.path, self, listener)
+        adapter = NetworkTableSubListenerAdapter(self._path, self, listener)
         adapters.append(adapter)
         self.node.addTableListener(adapter, True)
 
@@ -146,7 +159,10 @@ class NetworkTable:
         :returns: the networktable to be returned
         :rtype: :class:`NetworkTable`
         """
-        return self.provider.getTable(self.path + key)
+        path = self._path + key
+        # TODO: cache these?
+        return NetworkTable(path, self._api)
+        
 
     def containsKey(self, key):
         """Determines whether the given key is in this table.
@@ -154,7 +170,8 @@ class NetworkTable:
         :param key: the key to search for
         :returns: true if the table as a value assigned to the given key
         """
-        return self.node.containsKey(self.path + key)
+        path = self._path + key
+        return self._api.getEntryValue(path) is not None
 
     def __contains__(self, key):
         return self.containsKey(key)
@@ -167,12 +184,8 @@ class NetworkTable:
         :returns: true if there is a subtable with the key which contains at least
         one key/subtable of its own
         """
-        
-        subtablePrefix = self.path + key+self.PATH_SEPARATOR
-        for key in self.node.getEntryStore().keys():
-            if key.startswith(subtablePrefix):
-                return True
-        return False
+        path = self._path + key + self.PATH_SEPARATOR
+        return len(self._api.getEntryInfo(path, 0)) > 0
     
     def getKeys(self, types=0):
         """:param types: bitmask of types; 0 is treated as a "don't care".
@@ -180,12 +193,31 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        keys = []
+        for entry in self._api.getEntryInfo(self._path, types):
+            relative_key = entry.name[len(self._path):]
+            if self.PATH_SEPARATOR in relative_key:
+                continue
+            
+            keys.append(relative_key)
+        
+        return keys
         
     def getSubTables(self):
         """:returns: subtables currently in the table
         
         .. versionadded:: 2017.0.0
         """
+        keys = set()
+        for entry in self._api.getEntryInfo(self._path, 0):
+            relative_key = entry.name[len(self._path):]
+            subst = relative_key.split(self.PATH_SEPARATOR)
+            if len(subst) == 1:
+                continue
+            
+            keys.add(subst[0])
+        
+        return keys
     
     def setPersistent(self, key):
         """Makes a key's value persistent through program restarts.
@@ -194,6 +226,7 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        self.setFlags(key, NT_PERSISTENT)
         
     def clearPersistent(self, key):
         """Stop making a key's value persistent through program restarts.
@@ -203,6 +236,7 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        self.clearFlags(key, NT_PERSISTENT)
     
     def isPersistent(self, key):
         """Returns whether the value is persistent through program restarts.
@@ -212,6 +246,7 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        return self.getFlags(key) & NT_PERSISTENT != 0
         
     def delete(self, key):
         """Deletes the specified key in this table.
@@ -220,6 +255,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        self._api.deleteEntry(path)
     
     def setFlags(self, key, flags):
         """Sets flags on the specified key in this table. The key can
@@ -230,6 +267,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        self._api.setEntryFlags(path, self._api.getEntryFlags(path) | flags)
         
     def clearFlags(self, key, flags):
         """Clears flags on the specified key in this table. The key can
@@ -240,6 +279,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        self._api.setEntryFlags(path, self._api.getEntryFlags(path) & ~flags)
         
     def getFlags(self, key):
         """Returns the flags for the specified key.
@@ -249,6 +290,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.getEntryFlags(path)
 
     def putNumber(self, key, value):
         """Put a number in the table
@@ -257,7 +300,8 @@ class NetworkTable:
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
         """
-        self.node.putValue(self.path + key, float(value), DefaultEntryTypes.DOUBLE)
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeDouble(value))
 
     def setDefaultNumber(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
@@ -268,6 +312,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeDouble(defaultValue))
 
     def getNumber(self, key, defaultValue=_defaultValueSentry):
         """Gets the number associated with the given name.
@@ -281,12 +327,14 @@ class NetworkTable:
         :raises KeyError: If the value doesn't exist and no default is provided, or
                           if it is the wrong type
         """
-        try:
-            return self.node.getDouble(self.path + key)
-        except KeyError:
-            if defaultValue is NetworkTable._defaultValueSentry:
-                raise
-            return defaultValue
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_DOUBLE:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
 
     def putString(self, key, value):
         """Put a string in the table
@@ -295,7 +343,8 @@ class NetworkTable:
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
         """
-        self.node.putValue(self.path + key, str(value), DefaultEntryTypes.STRING)
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeString(value))
 
     def setDefaultString(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
@@ -304,6 +353,8 @@ class NetworkTable:
         :param defaultValue: the default value to set if key doesn't exist.
         :returns: False if the table key exists with a different type
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeString(defaultValue))
 
     def getString(self, key, defaultValue=_defaultValueSentry):
         """Gets the string associated with the given name. If the key does not
@@ -317,12 +368,14 @@ class NetworkTable:
         :raises KeyError: If the value doesn't exist and no default is provided, or
                           if it is the wrong type
         """
-        try:
-            return self.node.getString(self.path + key)
-        except KeyError:
-            if defaultValue is NetworkTable._defaultValueSentry:
-                raise
-            return defaultValue
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_STRING:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
 
     def putBoolean(self, key, value):
         """Put a boolean in the table
@@ -331,7 +384,8 @@ class NetworkTable:
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
         """
-        self.node.putValue(self.path + key, bool(value), DefaultEntryTypes.BOOLEAN)
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeBoolean(value))
 
     def setDefaultBoolean(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
@@ -342,6 +396,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeBoolean(defaultValue))
 
     def getBoolean(self, key, defaultValue=_defaultValueSentry):
         """Gets the boolean associated with the given name. If the key does not
@@ -355,12 +411,14 @@ class NetworkTable:
         :raises KeyError: If the value doesn't exist and no default is provided, or
                           if it is the wrong type
         """
-        try:
-            return self.node.getBoolean(self.path + key)
-        except KeyError:
-            if defaultValue is NetworkTable._defaultValueSentry:
-                raise
-            return defaultValue
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_BOOLEAN:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
 
     def putBooleanArray(self, key, value):
         """Put a boolean array in the table
@@ -371,6 +429,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeBooleanArray(value))
     
     def setDefaultBooleanArray(self, key, defaultValue=_defaultValueSentry):
         """Gets the current value in the table, setting it if it does not exist.
@@ -381,6 +441,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeBooleanArray(defaultValue))
         
     def getBooleanArray(self, key, defaultValue=_defaultValueSentry):
         """Returns the boolean array the key maps to. If the key does not exist or is
@@ -396,6 +458,14 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_BOOLEAN_ARRAY:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
     
     def putNumberArray(self, key, value):
         """Put a number array in the table
@@ -405,7 +475,9 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
-        
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeDoubleArray(value))
+    
     def setDefaultNumberArray(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
         
@@ -415,6 +487,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeDoubleArray(defaultValue))
     
     def getNumberArray(self, key, defaultValue=_defaultValueSentry):
         """Returns the number array the key maps to. If the key does not exist or is
@@ -430,24 +504,38 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_DOUBLE_ARRAY:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
         
     def putStringArray(self, key, value):
         """Put a string array in the table
+        
         :param key: the key to be assigned to
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeStringArray(value))
     
     def setDefaultStringArray(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
+        
         :param key: the key
         :param defaultValue: the default value to set if key doesn't exist.
         :returns: False if the table key exists with a different type
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeStringArray(defaultValue))
     
     def getStringArray(self, key, defaultValue=_defaultValueSentry):
         """Returns the string array the key maps to. If the key does not exist or is
@@ -463,6 +551,14 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_STRING_ARRAY:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
         
     def putRaw(self, key, value):
         """Put a raw value (byte array) in the table
@@ -472,6 +568,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setEntryValue(path, Value.makeRaw(value))
         
     def setDefaultRaw(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
@@ -481,6 +579,8 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, Value.makeRaw(defaultValue))
     
     def getRaw(self, key, defaultValue=_defaultValueSentry):
         """Returns the raw value (byte array) the key maps to. If the key does not
@@ -495,6 +595,14 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value or value.type != NT_RAW:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
     
     def putValue(self, key, value):
         """Put a value in the table
@@ -505,7 +613,18 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
-        self.node.putValue(self.path + key, value)
+        if isinstance(value, bool):
+            value = Value.makeBoolean(value)
+        elif isinstance(value, (int, float)):
+            value = Value.makeDouble(value)
+        elif isinstance(value, stringtype):
+            value = Value.makeString(value)
+        
+        else:
+            raise ValueError("Can only put bool/int/str/bytes or iterable of those")
+        
+        path = self._path + key
+        return self._api.setEntryValue(path, value)
 
     def setDefaultValue(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
@@ -515,29 +634,29 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
-        path = self.path + key
-        self._api.setDefaultEntryValue(path, V)
+        
+        path = self._path + key
+        return self._api.setDefaultEntryValue(path, value)
 
     def getValue(self, key, defaultValue=_defaultValueSentry):
         """Gets the value associated with a key as an object
         
         :param key: the key of the value to look up
-        :returns: the value associated with the given key, or nullptr if the key
-        does not exist
+        :returns: the value associated with the given key
         
         :raises KeyError: If the value doesn't exist and no default is provided, or
                           if it is the wrong type
         
         .. versionadded:: 2017.0.0
         """
-        try:
-            return self.node.getValue(self.path + key)
-        except KeyError:
-            if defaultValue is NetworkTable._defaultValueSentry:
-                raise
-            return defaultValue
-    
-    
+        path = self._path + key
+        value = self._api.getEntryValue(path)
+        if not value:
+            if defaultValue != _defaultValueSentry:
+                return defaultValue
+            raise KeyError(path)
+
+        return value.value
     
     def getAutoUpdateValue(self, key, defaultValue, writeDefault=True):
         '''Returns an object that will be automatically updated when the
@@ -561,6 +680,6 @@ class NetworkTable:
         
         .. versionadded:: 2015.1.3
         '''
-        return NetworkTable.getGlobalAutoUpdateValue(self.path + key, defaultValue, writeDefault)
+        return NetworkTable.getGlobalAutoUpdateValue(self._path + key, defaultValue, writeDefault)
 
     

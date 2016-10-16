@@ -13,5 +13,7 @@ except ImportError:
 
 if sys.version_info[0] == 2:
     range = xrange
+    stringtype = basestring
 else:
     range = range
+    stringtype = str

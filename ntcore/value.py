@@ -42,30 +42,30 @@ class Value(object):
         
     @staticmethod
     def makeDouble(value):
-        return ValueType(NT_DOUBLE, value)
+        return ValueType(NT_DOUBLE, float(value))
 
     @staticmethod
     def makeString(value):
-        return ValueType(NT_STRING, value)
+        return ValueType(NT_STRING, str(value))
     
     @staticmethod
     def makeRaw(value):
-        return ValueType(NT_RAW, value)
+        return ValueType(NT_RAW, bytes(value))
     
     # TODO: array stuff a good idea?
     
     @staticmethod
     def makeBooleanArray(value):
-        return ValueType(NT_BOOLEAN_ARRAY, tuple(value))
+        return ValueType(NT_BOOLEAN_ARRAY, tuple(bool(v) for v in value))
     
     @staticmethod
     def makeDoubleArray(value):
-        return ValueType(NT_DOUBLE_ARRAY, tuple(value))
+        return ValueType(NT_DOUBLE_ARRAY, tuple(float(v) for v in value))
     
     @staticmethod
     def makeStringArray(value):
-        return ValueType(NT_STRING_ARRAY, tuple(value))
+        return ValueType(NT_STRING_ARRAY, tuple(str(v) for v in value))
 
     @staticmethod
     def makeRpc(value):
-        return ValueType(NT_RPC, value)
+        return ValueType(NT_RPC, str(value))
