@@ -23,6 +23,8 @@ from .constants import (
     NT_RPC,
 )
 
+from .support.compat import stringtype
+
 ValueType = namedtuple('Value', ['type', 'value'])
 
 
@@ -69,3 +71,22 @@ class Value(object):
     @staticmethod
     def makeRpc(value):
         return ValueType(NT_RPC, str(value))
+
+    @staticmethod
+    def makeUnknown(value):
+        if isinstance(value, bool):
+            return Value.makeBoolean(value)
+        elif isinstance(value, (int, float)):
+            return Value.makeDouble(value)
+        elif isinstance(value, stringtype):
+            return Value.makeString(value)
+        elif isinstance(value, bytes):
+            return ValueType(NT_RAW, value)
+        
+        # TODO: decide how to deal with arrays
+        
+        elif value is None:
+            raise ValueError("Cannot put None into NetworkTable")
+        else:
+            raise ValueError("Can only put bool/int/str/bytes")
+

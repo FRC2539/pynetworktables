@@ -175,7 +175,7 @@ class Storage(object):
             # this has to happen outside the lock
             if outgoing:
                 for o in outgoing:
-                    queue_outgoing(o)
+                    queue_outgoing(*o)
     
     def _processEntryAssign(self, msg, conn, outgoing):
 
@@ -183,6 +183,7 @@ class Storage(object):
         name = msg.str
         entry = None
         may_need_update = False
+        
         if self.m_server:
             # if we're a server, id=0xffff requests are requests for an id
             # to be assigned, we need to send the assignment back to
@@ -211,7 +212,7 @@ class Storage(object):
                 self.m_notifier.notifyEntry(name, entry.value, NT_NOTIFY_NEW)
 
                 # send the assignment to everyone (including the originator)
-                if outgoing:
+                if outgoing is not None:
                     outmsg = Message.entryAssign(name, msg_id, entry.seq_num, msg.value, msg.flags)
                     outgoing.append((outmsg, None, None))
 
@@ -282,7 +283,7 @@ class Storage(object):
 
         # don't update flags from a <3.0 remote (not part of message)
         # don't update flags if self is a server response to a client id request
-        if not may_need_update and conn.proto_rev() >= 0x0300:
+        if not may_need_update and conn.get_proto_rev() >= 0x0300:
             # update persistent dirty flag if persistent flag changed
             if (entry.flags & NT_PERSISTENT) != (msg.flags & NT_PERSISTENT):
                 self.m_persistent_dirty = True
@@ -392,7 +393,7 @@ class Storage(object):
 
 
         # delete it from idmap
-        self.m_idmap[id] = None
+        self.m_idmap[msg_id] = None
 
         # get entry (as we'll need it for notify) and erase it from the map
         try:
@@ -502,7 +503,7 @@ class Storage(object):
                         entry.seq_num = seq_num
                         notify_flags = NT_NOTIFY_UPDATE
                         # don't update flags from a <3.0 remote (not part of message)
-                        if conn.proto_rev() >= 0x0300:
+                        if conn.get_proto_rev() >= 0x0300:
                             if entry.flags != msg.flags:
                                 notify_flags |= NT_NOTIFY_FLAGS
         
@@ -515,7 +516,7 @@ class Storage(object):
                 entry.id = msg_id
                 
                 ensure_id_exists(self.m_idmap, msg_id)
-                self.m_idmap[id] = entry
+                self.m_idmap[msg_id] = entry
             
             # generate assign messages for unassigned local entries
             for entry in self.m_entries.values():
@@ -916,7 +917,7 @@ class Storage(object):
             return 'Error reading file: %s' % e
         else:
             self._putPersistentEntries(entries)
-            return True
+            return
     
     def savePersistent(self, filename=None, periodic=False, fp=None):
         with self.m_persistence_save_lock:

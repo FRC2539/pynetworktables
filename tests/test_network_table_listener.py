@@ -1,3 +1,8 @@
+
+#
+# These tests are leftover from the original pynetworktables tests
+#
+
 import pytest
 
 from networktables.networktable import NetworkTableProvider

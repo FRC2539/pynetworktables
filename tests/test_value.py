@@ -5,6 +5,9 @@
 ''' the project.                                                               '''
 '''----------------------------------------------------------------------------'''
 
+#
+# These tests are adapted from ntcore's test suite
+#
 
 from ntcore.constants import *
 from ntcore.value import Value

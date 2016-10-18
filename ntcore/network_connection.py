@@ -72,7 +72,7 @@ class NetworkConnection(object):
         
         self.m_remote_id_mutex = threading.Lock()
         self.m_remote_id = None
-        self.m_last_post = None
+        self.m_last_post = 0
         
         self.m_pending_mutex = threading.Lock()
         self.m_pending_outgoing = []
@@ -89,8 +89,11 @@ class NetworkConnection(object):
         # turn off Nagle algorithm; we bundle packets for transmission
         self.m_stream.setNoDelay()
     
-    def __del__(self):
-        self.stop()
+    #def __del__(self):
+    #    self.stop()
+    
+    #def __repr__(self):
+    #    return '<NetworkConnection'
     
     def start(self):
         if self.m_active:
@@ -117,12 +120,19 @@ class NetworkConnection(object):
         self.m_read_thread = threading.Thread(target=self._readThreadMain,
                                                name='nt_read_thread')
         
+        self.m_write_thread.daemon = True
+        self.m_read_thread.daemon = True
+        
         self.m_write_thread.start()
         self.m_read_thread.start()
     
     
     def stop(self):
         logger.debug("NetworkConnection stopping (%s)", self)
+        
+        if not self.m_active:
+            return
+        
         self.m_state = self.State.kDead
         self.m_active = False
         # closing the stream so the read thread terminates
@@ -147,6 +157,12 @@ class NetworkConnection(object):
         except Empty:
             pass
     
+    def get_proto_rev(self):
+        return self.m_proto_rev
+    
+    def get_stream(self):
+        return self.m_stream
+    
     def info(self):
         return ConnectionInfo(self.remote_id(), self.m_stream.getPeerIP(),
                               self.m_stream.getPeerPort(),
@@ -154,6 +170,12 @@ class NetworkConnection(object):
     
     def last_update(self):
         return self.m_last_update
+    
+    def set_process_incoming(self, func):
+        self.m_process_incoming = func
+        
+    def set_proto_rev(self, proto_rev):
+        self.m_proto_rev = proto_rev
     
     def set_state(self, state):
         self.m_state = state
@@ -173,7 +195,7 @@ class NetworkConnection(object):
         return self.m_uid
      
     def _sendMessages(self, msgs):
-        self.m_outgoing.push(msgs)
+        self.m_outgoing.put(msgs)
     
     def _readThreadMain(self):
         decoder = WireCodec(self.m_proto_rev)
@@ -182,10 +204,27 @@ class NetworkConnection(object):
         
         def _getMessage():
             decoder.set_proto_rev(self.m_proto_rev)
-            return Message.read(self.m_stream, decoder, self.m_get_entry_type)
+            try:
+                return Message.read(self.m_stream, decoder, self.m_get_entry_type)
+            except IOError as e:
+                logger.warn("read error in handshake: %s", e)
+                
+                # terminate connection on bad message
+                self.m_stream.close()
+                
+                return None
+            
+        # TODO: race condition for notifyConnection!
     
         self.m_state = self.State.kHandshake
-        if not self.m_handshake(_getMessage, self._sendMessages):
+        
+        try:
+            handshake_success = self.m_handshake(self, _getMessage, self._sendMessages)
+        except Exception:
+            logger.exception("Unhandled exception during handshake")
+            handshake_success = False
+        
+        if not handshake_success:
             self.m_state = self.State.kDead
             self.m_active = False
         else:
@@ -200,7 +239,7 @@ class NetworkConnection(object):
                     decoder.set_proto_rev(self.m_proto_rev)
                     
                     try:
-                        msg = Message.read(decoder, self.m_get_entry_type)
+                        msg = Message.read(self.m_stream, decoder, self.m_get_entry_type)
                     except Exception as e:
                         logger.warn("read error: %s", e)
                         
@@ -227,7 +266,9 @@ class NetworkConnection(object):
         
             self.m_state = self.State.kDead
             self.m_active = False
-            self.m_outgoing.put([])  # also kill write thread
+        
+        # also kill write thread
+        self.m_outgoing.put([])  
         
         with self.m_shutdown_mutex:
             self.m_read_shutdown = True
@@ -267,8 +308,7 @@ class NetworkConnection(object):
                 if not out:
                     continue
         
-                if not self.m_stream.send(b''.join(out)):
-                    break
+                self.m_stream.send(b''.join(out))
                 
                 del out[:]
         

@@ -3,6 +3,9 @@ import threading
 
 from ntcore.api import NtCoreApi
 
+import logging
+logger = logging.getLogger('nt')
+
 __all__ = ["NetworkTables"]
 
 
@@ -42,18 +45,18 @@ class NetworkTables:
     PATH_SEPARATOR = '/'
     #: The default port that network tables operates on
     DEFAULT_PORT = 1735
-
-    _staticProvider = None
-    #_mode_fn = classmethod(_create_server_node)
     
-    _queuedAutoUpdateValues = []
+    #_queuedAutoUpdateValues = []
     #_autoListener = AutoUpdateListener()
+    
+    _persistentFilename = None
     
     port = DEFAULT_PORT
     ipAddress = None
     
-    _is_server = True
+    _mode = 'server'
     _running = False
+    _tables = {}
 
     _staticMutex = threading.RLock()
 
@@ -85,13 +88,23 @@ class NetworkTables:
             cls._checkInit()
             
             if server is not None:
-                cls._is_server = True
+                cls._mode = 'client'
                 cls.ipAddress = server
             
-            if cls._is_server:
+            if cls._mode == 'server':
                 cls._api.startServer(cls._persistentFilename, "", cls.port)
+            elif cls._mode == 'client':
+                cls._api.startClient([(cls.ipAddress, cls.port)])
+            elif cls._mode == 'dashboard':
+                raise ValueError("Dashboard mode isn't implemented yet")
+            elif cls._mode == 'test':
+                pass
             else:
-                cls._api.startClient(cls.ipAddress, cls.port)
+                raise ValueError("Invalid NetworkTables mode '%s'" % cls._mode)
+
+            from networktables import __version__
+            logger.info("NetworkTables %s initialized in %s mode",
+                        __version__, cls._mode)
 
             cls._running = True
             
@@ -114,12 +127,18 @@ class NetworkTables:
                 return
             
             try:
-                if cls._is_server:
+                if cls._mode in ['client', 'dashboard']:
                     cls._api.stopClient()
-                else:
+                elif cls._mode == 'server':
                     cls._api.stopServer()
             finally:
                 cls._running = False
+                cls._persistentFilename = None
+                cls._mode = 'server'
+                cls._tables = {}
+                cls.port = cls.DEFAULT_PORT
+                cls.ipAddress = None
+                cls._api = NtCoreApi()
     
     @classmethod
     def setClientMode(cls):
@@ -129,7 +148,7 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._is_server = False
+            cls._mode = 'client'
             
     @classmethod
     def setServerMode(cls):
@@ -139,7 +158,7 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._is_server = True
+            cls._mode = 'server'
     
     @classmethod
     def setTeam(cls, team):
@@ -279,7 +298,7 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._mode_fn = classmethod(_create_dashboard_node)
+            cls._mode = 'dashboard'
             
     @classmethod
     def setTestMode(cls):
@@ -289,12 +308,8 @@ class NetworkTables:
         """
         with cls._staticMutex:
             cls._checkInit()
-            cls._mode_fn = classmethod(_create_test_node)
-
+            cls._mode = 'test'
     
-
-    
-
     @classmethod
     def getTable(cls, key):
         """Gets the table with the specified key. If the table does not exist,
@@ -308,11 +323,24 @@ class NetworkTables:
         :rtype: :class:`.NetworkTable`
         """
         with cls._staticMutex:
-            if cls._staticProvider is None:
+            if not cls._running:
                 cls.initialize()
-            if not key.startswith(cls.PATH_SEPARATOR):
-                key = cls.PATH_SEPARATOR + key
-            return cls._staticProvider.getTable(key)
+            
+            if len(key) == 0 or key.startswith(cls.PATH_SEPARATOR):
+                path = key
+            else:
+                path = cls.PATH_SEPARATOR + key
+            
+            table = cls._tables.get(path)
+            if table is not None:
+                return table
+            
+            # TODO: circular import problem, fix in 2018
+            from .networktable import NetworkTable
+                
+            table = NetworkTable(path, cls._api)
+            cls._tables[path] = table
+            return table
 
     @classmethod
     def getGlobalTable(cls):
@@ -424,7 +452,7 @@ class NetworkTables:
     @classmethod
     def isServer(cls):
         """:returns: True if configured in server mode"""
-        return cls._is_server
+        return cls._mode == 'server'
     
     @classmethod
     def addConnectionListener(cls, listener, immediateNotify=False):

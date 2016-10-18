@@ -5,6 +5,10 @@
 ''' the project.                                                               '''
 '''----------------------------------------------------------------------------'''
 
+#
+# These tests are adapted from ntcore's test suite
+#
+
 from collections import namedtuple
 from io import StringIO
 

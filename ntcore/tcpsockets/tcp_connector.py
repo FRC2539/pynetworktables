@@ -10,5 +10,8 @@ def TcpConnector(server, port, timeout):
             sd = socket.create_connection((server, port))
         else:
             sd = socket.create_connection((server, port), timeout)
+            sd.settimeout(None)
         
         return TCPStream(sd, server, port)
+
+    return _connect

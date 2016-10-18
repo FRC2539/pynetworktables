@@ -1,7 +1,6 @@
 
 from ntcore.storage import _Entry
 
-
 def test_sequence_numbers():
     
     e = _Entry('name')

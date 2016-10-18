@@ -19,6 +19,7 @@ from .tcpsockets.tcp_connector import TcpConnector
 from .support.threading_support import Condition
 
 from .constants import (
+    kKeepAlive,
     kClientHello,
     kProtoUnsup,
     kServerHello,
@@ -51,9 +52,9 @@ class Dispatcher(object):
         self.m_identity = ""
         
         self.m_active = False # set to false to terminate threads
-        self.m_update_rate = 0.100 # periodic dispatch rate, in s
+        self.m_update_rate = 0.050 # periodic dispatch rate, in s
         
-        self.m_flush_mutex = threading.RLock()
+        self.m_flush_mutex = threading.Lock()
         self.m_flush_cv = Condition(self.m_flush_mutex)
         self.m_last_flush = 0
         self.m_do_flush = False
@@ -96,6 +97,9 @@ class Dispatcher(object):
         self.m_dispatch_thread = threading.Thread(target=self._dispatchThreadMain, name='nt-dispatch-thread') 
         self.m_clientserver_thread = threading.Thread(target=self._serverThreadMain, name='nt-server-thread')
         
+        self.m_dispatch_thread.daemon = True
+        self.m_clientserver_thread.daemon = True
+        
         self.m_dispatch_thread.start()
         self.m_clientserver_thread.start()
     
@@ -122,6 +126,9 @@ class Dispatcher(object):
     
     
     def stop(self):
+        if not self.m_active:
+            return
+        
         self.m_active = False
     
         # wake up dispatch thread with a flush
@@ -154,6 +161,10 @@ class Dispatcher(object):
         # close all connections
         for conn in conns:
             conn.stop()
+            
+        # cleanup the server socket
+        if self.m_server_acceptor:
+            self.m_server_acceptor.close()
     
     def setUpdateRate(self, interval):
         # don't allow update rates faster than 10 ms or slower than 1 second
@@ -205,6 +216,9 @@ class Dispatcher(object):
     
                 self.m_notifier.notifyConnection(True, conn.info(), callback)
     
+    def _dispatchWaitFor(self):
+        return not self.m_active or self.m_do_flush
+    
     def _dispatchThreadMain(self):
         timeout_time = monotonic()
     
@@ -213,57 +227,58 @@ class Dispatcher(object):
     
         count = 0
         
-        with self.m_flush_mutex:
-            while self.m_active:
-                # handle loop taking too long
-                start = monotonic()
-                if start > timeout_time:
-                    timeout_time = start
-        
-                # wait for periodic or when flushed
-                timeout_time += self.m_update_rate
-                while not (not self.m_active or self.m_do_flush):
-                    self.m_flush_cv.wait
-                self.m_flush_cv.wait_until(flush_lock, timeout_time,
-                                      [&] { return  })
+        while self.m_active:
+            # handle loop taking too long
+            start = monotonic()
+            if start > timeout_time:
+                timeout_time = start
+    
+            # wait for periodic or when flushed
+            timeout_time += self.m_update_rate
+            with self.m_flush_mutex:
+                self.m_flush_cv.wait_for(self._dispatchWaitFor, timeout_time - start)
                 self.m_do_flush = False
-                if not self.m_active:
-                    break    # in case we were woken up to terminate
-                
-                # perform periodic persistent save
-                if self.m_server and self.m_persist_filename and start > next_save_time:
-                    next_save_time += save_delta_time
-                    # handle loop taking too long
-                    if start > next_save_time:
-                        next_save_time = start + save_delta_time
-        
-                    err = self.m_storage.savePersistent(self.m_persist_filename, True)
-                    if err:
-                        logger.warning("periodic persistent save: %s", err)
-                    
-                    with self.m_user_mutex:
-                        reconnect = False
             
-                        count += 1
-                        if count > 10:
-                            logger.debug("dispatch running %s connections",
-                                         len(self.m_connections))
-                            count = 0
-                        
-                        for conn in self.m_connections:
-                            # post outgoing messages if connection is active
-                            # only send keep-alives on client
-                            if conn.state() == NetworkConnection.kActive:
-                                conn.postOutgoing(not self.m_server)
-                            
-                            # if client, if connection died
-                            if not self.m_server and conn.state() == NetworkConnection.kDead:
-                                reconnect = True
-                        
-                        # reconnect if we disconnected (and a reconnect is not in progress)
-                        if reconnect and not self.m_do_reconnect:
-                            self.m_do_reconnect = True
-                            self.m_reconnect_cv.notify()
+            # in case we were woken up to terminate
+            if not self.m_active:
+                break    
+            
+            # perform periodic persistent save
+            if self.m_server and self.m_persist_filename and start > next_save_time:
+                next_save_time += save_delta_time
+                # handle loop taking too long
+                if start > next_save_time:
+                    next_save_time = start + save_delta_time
+    
+                err = self.m_storage.savePersistent(self.m_persist_filename, True)
+                if err:
+                    logger.warning("periodic persistent save: %s", err)
+                
+            with self.m_user_mutex:
+                reconnect = False
+    
+                if self.m_verbose:
+                    count += 1
+                    if count > 10:
+                        logger.debug("dispatch running %s connections",
+                                     len(self.m_connections))
+                        count = 0
+                
+                for conn in self.m_connections:
+                    # post outgoing messages if connection is active
+                    # only send keep-alives on client
+                    state = conn.state()
+                    if state == NetworkConnection.State.kActive:
+                        conn.postOutgoing(not self.m_server)
+                    
+                    # if client, if connection died
+                    if not self.m_server and state == NetworkConnection.State.kDead:
+                        reconnect = True
+                
+                # reconnect if we disconnected (and a reconnect is not in progress)
+                if reconnect and not self.m_do_reconnect:
+                    self.m_do_reconnect = True
+                    self.m_reconnect_cv.notify()
     
     def _queueOutgoing(self, msg, only, except_):
         with self.m_user_mutex:
@@ -282,89 +297,100 @@ class Dispatcher(object):
                 conn.queueOutgoing(msg)
     
     def _serverThreadMain(self):
-        if self.m_server_acceptor.start() != 0:
+        if not self.m_server_acceptor.start():
             self.m_active = False
-            return
-    
-        while self.m_active:
-            stream = self.m_server_acceptor.accept()
-            if not stream:
-                self.m_active = False
-                return
-    
-            if not self.m_active:
-                return
-    
-            logger.debug("server: client connection from %s port %s",
-                         stream.getPeerIP(), stream.getPeerPort())
-    
-            # add to connections list
-            conn = NetworkConnection(stream, self.m_notifier,
-                                     self._serverHandshake,
-                                     self.m_storage.getEntryType)
-            
-            conn.set_process_incoming(self.m_storage.processIncoming)
+        
+        try:
+            while self.m_active:
+                stream = self.m_server_acceptor.accept()
+                if not stream:
+                    self.m_active = False
+                    return
+        
+                if not self.m_active:
+                    return
+        
+                logger.debug("server: client connection from %s port %s",
+                             stream.getPeerIP(), stream.getPeerPort())
+        
+                # add to connections list
+                conn = NetworkConnection(stream, self.m_notifier,
+                                         self._serverHandshake,
+                                         self.m_storage.getEntryType,
+                                         verbose=self.m_verbose)
                 
-            with self.m_user_mutex:
-                # reuse dead connection slots
-                for i in range(len(self.m_connections)):
-                    c = self.m_connections[i]
-                    if c.state() == NetworkConnection.State.kDead:
-                        c.stop()
-                        self.m_connections[i] = conn
-                        break
-                else:
-                    self.m_connections.append(conn)
-    
-                conn.start()
+                conn.set_process_incoming(self.m_storage.processIncoming)
+                    
+                with self.m_user_mutex:
+                    # reuse dead connection slots
+                    for i in range(len(self.m_connections)):
+                        c = self.m_connections[i]
+                        if c.state() == NetworkConnection.State.kDead:
+                            c.stop()
+                            self.m_connections[i] = conn
+                            break
+                    else:
+                        self.m_connections.append(conn)
+        
+                    conn.start()
+        finally:
+            logger.debug("server thread exiting")
     
     def _clientThreadMain(self):
         i = 0
-        while self.m_active:
-            # sleep between retries
-            time.sleep(250)
-    
-            # get next server to connect to
-            with self.m_user_mutex:
-                if not self.m_client_connectors:
-                    continue
-    
-                if i >= len(self.m_client_connectors):
-                    i = 0
-    
-                connect = self.m_client_connectors[i]
-                i += 1
-            
-            # try to connect (with timeout)
-            logger.debug("client trying to connect")
-            stream = connect()
-            if not stream:
-                continue    # keep retrying
-    
-            logger.debug("client connected")
-    
-            with self.m_user_mutex:
-                conn = NetworkConnection(stream, self.m_notifier,
-                                         self._clientHandshake,
-                                         self.m_storage.getEntryType)
-                
-                conn.set_process_incoming(self.m_storage.processIncoming)
-                
-                # disconnect any current
-                for c in self.m_connections:
-                    if c != conn:
-                        c.stop()
-                
-                del self.m_connections[:]
-                self.m_connections.append(conn)
-                conn.set_proto_rev(self.m_reconnect_proto_rev)
-                conn.start()
         
-                # block until told to reconnect
-                self.m_do_reconnect = False
+        try:
+            while self.m_active:
+                # sleep between retries
+                time.sleep(0.250)
+        
+                # get next server to connect to
+                with self.m_user_mutex:
+                    if not self.m_client_connectors:
+                        continue
+        
+                    if i >= len(self.m_client_connectors):
+                        i = 0
+        
+                    connect = self.m_client_connectors[i]
+                    i += 1
                 
-                while not (not self.m_active or self.m_do_reconnect):
-                    self.m_reconnect_cv.wait()
+                # try to connect (with timeout)
+                if self.m_verbose:
+                    logger.debug("client trying to connect")
+                    
+                try:
+                    stream = connect()
+                except IOError:
+                    continue    # keep retrying
+        
+                logger.debug("client connected")
+        
+                with self.m_user_mutex:
+                    conn = NetworkConnection(stream, self.m_notifier,
+                                             self._clientHandshake,
+                                             self.m_storage.getEntryType,
+                                             verbose=self.m_verbose)
+                    
+                    conn.set_process_incoming(self.m_storage.processIncoming)
+                    
+                    # disconnect any current
+                    for c in self.m_connections:
+                        if c != conn:
+                            c.stop()
+                    
+                    del self.m_connections[:]
+                    self.m_connections.append(conn)
+                    conn.set_proto_rev(self.m_reconnect_proto_rev)
+                    conn.start()
+            
+                    # block until told to reconnect
+                    self.m_do_reconnect = False
+                    
+                    while not (not self.m_active or self.m_do_reconnect):
+                        self.m_reconnect_cv.wait()
+        finally:
+            logger.debug("client thread exiting")
     
     def _clientHandshake(self, conn, get_msg, send_msgs):
         # get identity
@@ -372,8 +398,10 @@ class Dispatcher(object):
             self_id = self.m_identity
         
         # send client hello
-        logger.debug("client: sending hello")
-        send_msgs(Message.clientHello(self_id))
+        if self.m_verbose:
+            logger.debug("client: sending hello")
+        
+        send_msgs((Message.clientHello(0x0300, self_id),))
     
         # wait for response
         msg = get_msg()
@@ -389,7 +417,7 @@ class Dispatcher(object):
             return False
         
         new_server = True
-        if conn.proto_rev() >= 0x0300:
+        if conn.get_proto_rev() >= 0x0300:
             # should be server hello; if not, disconnect.
             if not msg.type == kServerHello:
                 return False
@@ -409,20 +437,20 @@ class Dispatcher(object):
                 logger.debug("client: server disconnected during initial entries")
                 return False
     
-            if self.m_verbose:
-                logger.debug("received init str=%s id=%s seq_num=%s",
-                             msg.str, msg.id. msg.seq_num_uid)
-                
             if msg.type == kServerHelloDone:
                 break
-    
+            
             if not msg.type == kEntryAssign:
                 # unexpected message
                 logger.debug("client: received message (%s) other than entry assignment during initial handshake",
                              msg.type)
                 return False
+            
+            if self.m_verbose:
+                logger.debug("received assign str=%s id=%s seq_num=%s",
+                             msg.str, msg.id, msg.seq_num_uid)
     
-            incoming.add(msg)
+            incoming.append(msg)
             # get the next message
             msg = get_msg()
         
@@ -431,15 +459,15 @@ class Dispatcher(object):
     
         self.m_storage.applyInitialAssignments(conn, incoming, new_server, outgoing)
     
-        if conn.proto_rev() >= 0x0300:
+        if conn.get_proto_rev() >= 0x0300:
             outgoing.append(Message.clientHelloDone())
         
-        if not outgoing.empty():
+        if outgoing:
             send_msgs(outgoing)
-    
-    
+        
+        stream = conn.get_stream()
         logger.info("client: CONNECTED to server %s port %s",
-                    conn.stream().getPeerIP(), conn.stream().getPeerPort())
+                    stream.getPeerIP(), stream.getPeerPort())
         return True
     
     def _serverHandshake(self, conn, get_msg, send_msgs):
@@ -457,14 +485,14 @@ class Dispatcher(object):
         proto_rev = msg.id
         if proto_rev > 0x0300:
             logger.debug("server: client requested proto > 0x0300")
-            send_msgs(Message.protoUnsup())
+            send_msgs((Message.protoUnsup(),))
             return False
     
         if proto_rev >= 0x0300:
             conn.set_remote_id(msg.str)
     
         # Set the proto version to the client requested version
-        logger.debug("server: client protocol %s", proto_rev)
+        logger.debug("server: client protocol 0x%04x", proto_rev)
         conn.set_proto_rev(proto_rev)
     
         # Send initial set of assignments
@@ -482,7 +510,9 @@ class Dispatcher(object):
         outgoing.append(Message.serverHelloDone())
     
         # Batch transmit
-        logger.debug("server: sending initial assignments")
+        if self.m_verbose:
+            logger.debug("server: sending initial assignments")
+        
         send_msgs(outgoing)
     
         # In proto rev 3.0 and later, handshake concludes with a client hello
@@ -492,8 +522,9 @@ class Dispatcher(object):
         if proto_rev >= 0x0300:
             # receive client initial assignments
             incoming = []
-            msg = get_msg()
             while True:
+                # get the next message (blocks)
+                msg = get_msg()
                 if not msg:
                     # disconnected, retry
                     logger.debug("server: disconnected waiting for initial entries")
@@ -501,25 +532,30 @@ class Dispatcher(object):
     
                 if msg.type == kClientHelloDone:
                     break
-    
+                elif msg.type == kKeepAlive:
+                    continue
+                
                 if msg.type != kEntryAssign:
                     # unexpected message
                     logger.debug("server: received message (%s) other than entry assignment during initial handshake",
                                  msg.type)
                     return False
+                
+                if self.m_verbose:
+                    logger.debug("received assign str=%s id=%s seq_num=%s",
+                                 msg.str, msg.id, msg.seq_num_uid)
     
                 incoming.append(msg)
-                # get the next message (blocks)
-                msg = get_msg()
     
             for msg in incoming:
                 self.m_storage.processIncoming(msg, conn)
     
+        stream = conn.get_stream()
         logger.info("server: client CONNECTED: %s port %s",
-                    conn.stream().getPeerIP(), conn.stream().getPeerPort())
+                    stream.getPeerIP(), stream.getPeerPort())
         return True
     
-    def _clientReconnect(self, proto_rev):
+    def _clientReconnect(self, proto_rev=0x0300):
         if self.m_server:
             return
     

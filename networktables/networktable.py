@@ -18,7 +18,6 @@ from ntcore.constants import (
     NT_PERSISTENT
 )
 
-from ntcore.support.compat import stringtype
 from ntcore.value import Value
 
 class _defaultValueSentry:
@@ -82,8 +81,14 @@ class NetworkTable:
     
     
     def __init__(self, path, api):
+        
+        if path.endswith(self.PATH_SEPARATOR):
+            path = path[:-1]
+        
+        #: Path of table without trailing slash
         self.path = path
         self._path = path + self.PATH_SEPARATOR
+            
         self._api = api
         
         self.listenerMap = {}
@@ -160,8 +165,7 @@ class NetworkTable:
         :rtype: :class:`NetworkTable`
         """
         path = self._path + key
-        # TODO: cache these?
-        return NetworkTable(path, self._api)
+        return _NT.getTable(path)
         
 
     def containsKey(self, key):
@@ -469,6 +473,7 @@ class NetworkTable:
     
     def putNumberArray(self, key, value):
         """Put a number array in the table
+        
         :param key: the key to be assigned to
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
@@ -562,6 +567,7 @@ class NetworkTable:
         
     def putRaw(self, key, value):
         """Put a raw value (byte array) in the table
+        
         :param key: the key to be assigned to
         :param value: the value that will be assigned
         :returns: False if the table key already exists with a different type
@@ -573,6 +579,7 @@ class NetworkTable:
         
     def setDefaultRaw(self, key, defaultValue):
         """Gets the current value in the table, setting it if it does not exist.
+        
         :param key: the key
         :param defaultValue: the default value to set if key doesn't exist.
         :returns: False if the table key exists with a different type
@@ -585,6 +592,7 @@ class NetworkTable:
     def getRaw(self, key, defaultValue=_defaultValueSentry):
         """Returns the raw value (byte array) the key maps to. If the key does not
         exist or is of different type, it will return the default value.
+        
         :param key: the key to look up
         :param defaultValue: the value to be returned if no value is found
         :returns: the value associated with the given key or the given default value
@@ -605,7 +613,20 @@ class NetworkTable:
         return value.value
     
     def putValue(self, key, value):
-        """Put a value in the table
+        """Put a value in the table, trying to autodetect the NT type of
+        the value. Refer to this table to determine the type mapping:
+        
+        ======= ============= ============================== 
+        PyType  NT Type       Notes
+        ======= ============= ==============================
+        bool    NT_BOOLEAN
+        int     NT_DOUBLE
+        float   NT_DOUBLE
+        str     NT_STRING
+        bytes   NT_RAW        Doesn't work in Python 2.7
+        list    Error         Not currently supported
+        tuple   Error         Not currently supported
+        ======= ============= ==============================
         
         :param key: the key to be assigned to
         :param value: the value that will be assigned
@@ -613,33 +634,27 @@ class NetworkTable:
         
         .. versionadded:: 2017.0.0
         """
-        if isinstance(value, bool):
-            value = Value.makeBoolean(value)
-        elif isinstance(value, (int, float)):
-            value = Value.makeDouble(value)
-        elif isinstance(value, stringtype):
-            value = Value.makeString(value)
-        
-        else:
-            raise ValueError("Can only put bool/int/str/bytes or iterable of those")
-        
+        value = Value.makeUnknown(value)
         path = self._path + key
         return self._api.setEntryValue(path, value)
 
     def setDefaultValue(self, key, defaultValue):
-        """Gets the current value in the table, setting it if it does not exist.
+        """Gets the current value in the table, setting it if it does not
+        exist. 
+        
         :param key: the key
         :param defaultValue: the default value to set if key doesn't exist.
         :returns: False if the table key exists with a different type
         
         .. versionadded:: 2017.0.0
         """
-        
+        defaultValue = Value.makeUnknown(defaultValue)
         path = self._path + key
-        return self._api.setDefaultEntryValue(path, value)
+        return self._api.setDefaultEntryValue(path, defaultValue)
 
     def getValue(self, key, defaultValue=_defaultValueSentry):
-        """Gets the value associated with a key as an object
+        """Gets the value associated with a key. This supports all
+        NetworkTables types (unlike putValue).
         
         :param key: the key of the value to look up
         :returns: the value associated with the given key

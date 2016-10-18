@@ -85,6 +85,7 @@ class Notifier(object):
         if not self.m_owner:
             self.m_active = True
             self.m_owner = threading.Thread(target=self._thread_main, name='notifier_thread')
+            self.m_owner.daemon = True
             self.m_owner.start()
     
     def stop(self):
@@ -213,7 +214,7 @@ class Notifier(object):
         except KeyError:
             pass
     
-    def notifyConnection(self, connected, conn_info, only):
+    def notifyConnection(self, connected, conn_info, only=None):
         if not self.m_owner:
             return
         

@@ -122,7 +122,7 @@ class RpcServer(object):
             
             logger.debug("rpc calling %s", item.name)
 
-            if item.name.empty() or not item.msg or not item.func or not item.send_response:
+            if not item.name or not item.msg or not item.func or not item.send_response:
                 continue
             
             try:

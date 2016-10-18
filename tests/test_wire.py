@@ -1,4 +1,8 @@
 
+#
+# These tests are adapted from ntcore's test suite
+#
+
 from __future__ import print_function
 
 from io import BytesIO
@@ -7,8 +11,14 @@ import pytest
 
 from ntcore.message import Message, MessageType
 from ntcore.value import Value
-from ntcore.tcpsockets.tcp_stream import ReadStream, StreamEOF
+from ntcore.tcpsockets.tcp_stream import TCPStream, StreamEOF
 from ntcore.wire import WireCodec
+
+
+class ReadStream(TCPStream):
+    def __init__(self, fp):
+        self.m_rdsock = fp
+
 
 @pytest.fixture(params=[
     0x0200, 0x0300

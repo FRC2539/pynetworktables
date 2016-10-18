@@ -1,6 +1,5 @@
 
-from networktables2 import StringArray
-from .networktable import NetworkTable
+from .networktables import NetworkTables
 
 
 def ntproperty(key, defaultValue, writeDefault=True):
@@ -38,15 +37,19 @@ def ntproperty(key, defaultValue, writeDefault=True):
                   
         .. versionadded:: 2015.3.0
     '''
-    ntvalue = NetworkTable.getGlobalAutoUpdateValue(key, defaultValue, writeDefault)
+    ntvalue = NetworkTables.getGlobalAutoUpdateValue(key, defaultValue, writeDefault)
     nttable = []
+    
+    # TODO: optimization: at some point we can detect the type
+    #       of the value, and just directly call table.putXXX
+    #       directly instead of calling putValue
     
     def _get(_):
         return ntvalue.value
     
     def _set(_, value):
         if not nttable:
-            nttable.append(NetworkTable.getGlobalTable())
+            nttable.append(NetworkTables.getGlobalTable())
         nttable[0].putValue(key, value)
         ntvalue._AutoUpdateValue__value = value
     
@@ -70,7 +73,7 @@ class ChooserControl(object):
                                  selection changes. Signature: fn(value)
         '''
         
-        self.subtable = NetworkTable.getTable('SmartDashboard').getSubTable(key)
+        self.subtable = NetworkTables.getTable('SmartDashboard').getSubTable(key)
 
         self.on_choices = on_choices
         self.on_selected = on_selected
@@ -86,16 +89,11 @@ class ChooserControl(object):
     def getChoices(self):
         '''
             Returns the current choices. If the chooser doesn't exist, this
-            will return an empty array.
+            will return an empty tuple.
         
             :rtype: :class:`.StringArray`
         '''
-        choices = StringArray()
-        try:
-            self.subtable.retrieveValue('options', choices)
-        except KeyError:
-            pass
-        return choices
+        return self.subtable.getStringArray('options', ())
     
     def getSelected(self):
         '''

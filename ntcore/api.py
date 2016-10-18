@@ -112,9 +112,15 @@ class NtCoreApi(object):
         
     def startServer(self, persist_filename, listen_address, port):
         self.dispatcher.startServer(persist_filename, listen_address, port)
+    
+    def stopServer(self):
+        self.dispatcher.stop()
         
-    def startClient(self, server_name, port):
-        self.dispatcher.startClient([(server_name, port)])
+    def startClient(self, servers):
+        self.dispatcher.startClient(servers)
+        
+    def stopClient(self):
+        self.dispatcher.stop()
     
     def setUpdateRate(self, interval):
         self.dispatcher.setUpdateRate(interval)

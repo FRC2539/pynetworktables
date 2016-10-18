@@ -1,28 +1,28 @@
 
+#
+# These tests are leftover from the original pynetworktables tests
+#
+
 import pytest
 
-from networktables.networktable import NetworkTableProvider
-from networktables2 import NetworkTableClient
-
-class NullStreamFactory:
-    def createStream(self):
-        return None
+from networktables import NetworkTables
 
 @pytest.fixture(scope='function')
-def client():
-    return NetworkTableClient(NullStreamFactory())
+def nt():
+    NetworkTables.setTestMode()
+    NetworkTables.initialize()
+    
+    yield NetworkTables
+    
+    NetworkTables.shutdown()
 
 @pytest.fixture(scope='function')
-def provider(client):
-    return NetworkTableProvider(client)
-
-@pytest.fixture(scope='function')
-def table1(provider):
-    return provider.getTable('/test1')
+def table1(nt):
+    return nt.getTable('/test1')
     
 @pytest.fixture(scope='function')
-def table2(provider):
-    return provider.getTable('/test2')
+def table2(nt):
+    return nt.getTable('/test2')
 
 
 def test_put_double(table1):
@@ -117,12 +117,20 @@ def test_multi_table(table1, table2):
     with pytest.raises(KeyError):
         table1.getString('table2string')
 
-def test_get_table(provider, table1, table2):
-    assert provider.getTable('/test1') is table1
-    assert provider.getTable('/test2') is table2
+def test_get_table(nt, table1, table2):
+    assert nt.getTable('/test1') is table1
+    assert nt.getTable('/test2') is table2
     
     assert table1 is not table2
 
-    table3 = provider.getTable('/test3')
+    table3 = nt.getTable('/test3')
     assert table1 is not table3
     assert table2 is not table3
+    
+def test_get_subtable(nt, table1):
+    st1 = table1.getSubTable('test1')
+    
+    assert nt.getTable('/test1/test1') is st1
+    assert table1.getSubTable('test1') is st1
+    
+    
