@@ -16,7 +16,10 @@ from .constants import (
     kExecuteRpc,
     kRpcResponse,
     
-    kClearAllMagic
+    kClearAllMagic,
+    
+    NT_VTYPE2RAW,
+    NT_RAW2VTYPE,
 )
 
 _empty_msgtypes = [kKeepAlive, kServerHelloDone, kClientHelloDone]
@@ -109,21 +112,22 @@ class Message(object):
            
         elif msgtype == kEntryAssign:
             msg_str = codec.read_string(rstream)
-            value_type = rstream.read(1)
+            value_type = NT_RAW2VTYPE.get(rstream.read(1))
             if codec.proto_rev >= 0x0300:
                 msg_id, seq_num_uid, flags = rstream.readStruct(codec.entryAssign)
             else:
                 msg_id, seq_num_uid = rstream.readStruct(codec.entryAssign)
+                flags = 0
                 
             value = codec.read_value(value_type, rstream)
         
         elif msgtype == kEntryUpdate:
             if codec.proto_rev >= 0x0300:
                 msg_id, seq_num_uid = rstream.readStruct(codec.entryUpdate)
-                value_type = rstream.read(1)
+                value_type = NT_RAW2VTYPE.get(rstream.read(1))
             else:
                 msg_id, seq_num_uid = rstream.readStruct(codec.entryUpdate)
-                value_type = get_entry_type(seq_num_uid)
+                value_type = get_entry_type(msg_id)
             
             value = codec.read_value(value_type, rstream)
             
@@ -185,7 +189,7 @@ class Message(object):
                 sb = codec.entryAssign.pack(msg.id, msg.seq_num_uid, msg.flags)
             else:
                 sb = codec.entryAssign.pack(msg.id, msg.seq_num_uid)
-            out += (value.type, sb)
+            out += (NT_VTYPE2RAW[value.type], sb)
             
             codec.write_value(value, out)
         
@@ -194,7 +198,7 @@ class Message(object):
             if codec.proto_rev >= 0x0300:
                 out += (msgtype,
                         codec.entryUpdate.pack(msg.id, msg.seq_num_uid),
-                        value.type)
+                        NT_VTYPE2RAW[value.type])
             else:
                 out += (msgtype,
                         codec.entryUpdate.pack(msg.id, msg.seq_num_uid))

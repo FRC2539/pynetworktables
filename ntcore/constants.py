@@ -12,6 +12,22 @@ NT_DOUBLE_ARRAY =   b'\x20'
 NT_STRING_ARRAY =   b'\x40'
 NT_RPC =            b'\x80'
 
+# Raw types transmitted on the wire
+NT_VTYPE2RAW = {
+    NT_BOOLEAN:       b'\x00',
+    NT_DOUBLE:        b'\x01',
+    NT_STRING:        b'\x02',
+    NT_RAW:           b'\x03',
+    NT_BOOLEAN_ARRAY: b'\x10',
+    NT_DOUBLE_ARRAY:  b'\x11',
+    NT_STRING_ARRAY:  b'\x12',
+    NT_RPC:           b'\x20',
+}
+
+NT_RAW2VTYPE = {v: k for k, v in NT_VTYPE2RAW.items()}
+
+
+
 # NetworkTables notifier kinds.
 NT_NOTIFY_NONE =        0x00
 NT_NOTIFY_IMMEDIATE =   0x01 # initial listener addition

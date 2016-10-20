@@ -62,9 +62,6 @@ class Dispatcher(object):
         self.m_reconnect_cv = Condition(self.m_user_mutex)
         self.m_reconnect_proto_rev = 0x0300
         self.m_do_reconnect = True
-        
-    #def __del__(self): # TODO
-    #    self.stop()
     
     def startServer(self, persist_filename, listen_address, port):
         acceptor = TcpAcceptor(port, listen_address)

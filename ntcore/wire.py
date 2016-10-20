@@ -37,11 +37,10 @@ from .value import Value
 _clientHello = struct.Struct('>H')
 _protoUnsup = struct.Struct('>H')
 _entryAssignV2 = struct.Struct('>HH')
-_entryUpdateV2 = struct.Struct('>HH')
+_entryUpdate = struct.Struct('>HH')
 
 _serverHello = struct.Struct('b')
 _entryAssignV3 = struct.Struct('>HHb')
-_entryUpdateV3 = struct.Struct('>HH')
 _flagsUpdate = struct.Struct('>Hb')
 _entryDelete = struct.Struct('>H')
 _clearEntries = struct.Struct('>I')
@@ -59,7 +58,7 @@ class WireCodec(object):
         
     clientHello = _clientHello
     protoUnsup = _protoUnsup
-    
+    entryUpdate = _entryUpdate
         
     def __init__(self, proto_rev):
         self.set_proto_rev(proto_rev)
@@ -73,7 +72,6 @@ class WireCodec(object):
             self.write_string = self.write_string_v2
             
             self.entryAssign = _entryAssignV2
-            self.entryUpdate = _entryUpdateV2
             
             self._del('serverHello')
             self._del('flagsUpdate')
@@ -89,7 +87,6 @@ class WireCodec(object):
             self.write_string = self.write_string_v3
             
             self.entryAssign = _entryAssignV3
-            self.entryUpdate = _entryUpdateV3
             
             self.serverHello = _serverHello
             self.flagsUpdate = _flagsUpdate

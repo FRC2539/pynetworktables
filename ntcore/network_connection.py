@@ -25,6 +25,7 @@ from .wire import WireCodec
 
 from .support.compat import Queue, Empty
 from .support.lists import Pair
+from .tcpsockets.tcp_stream import StreamEOF
 
 import logging
 logger = logging.getLogger('nt')
@@ -88,12 +89,6 @@ class NetworkConnection(object):
     
         # turn off Nagle algorithm; we bundle packets for transmission
         self.m_stream.setNoDelay()
-    
-    #def __del__(self):
-    #    self.stop()
-    
-    #def __repr__(self):
-    #    return '<NetworkConnection'
     
     def start(self):
         if self.m_active:
@@ -241,7 +236,11 @@ class NetworkConnection(object):
                     try:
                         msg = Message.read(self.m_stream, decoder, self.m_get_entry_type)
                     except Exception as e:
-                        logger.warn("read error: %s", e)
+                        if not isinstance(e, StreamEOF):
+                            if self.m_verbose:
+                                logger.exception("read error")
+                            else:
+                                logger.warn("read error: %s", e)
                         
                         # terminate connection on bad message
                         self.m_stream.close()
@@ -249,8 +248,8 @@ class NetworkConnection(object):
                         break
             
                     if verbose:
-                        logger.debug('received type=%s with str=%s id=%s seq_num=%s',
-                                     msg.type, msg.str, msg.id, msg.seq_num_uid)
+                        logger.debug('received type=%s with str=%s id=%s seq_num=%s value=%s',
+                                     msg.type, msg.str, msg.id, msg.seq_num_uid, msg.value)
                     
                     self.m_last_update = monotonic()
                     self.m_process_incoming(msg, self)
@@ -297,8 +296,8 @@ class NetworkConnection(object):
                 for msg in msgs:
                     if msg:
                         if verbose:
-                            logger.debug('sending type=%s with str=%s id=%s seq_num=%s',
-                                         msg.type, msg.str, msg.id, msg.seq_num_uid)
+                            logger.debug('sending type=%s with str=%s id=%s seq_num=%s value=%s',
+                                         msg.type, msg.str, msg.id, msg.seq_num_uid, msg.value)
                         
                         Message.write(msg, out, encoder)
                 
@@ -307,7 +306,7 @@ class NetworkConnection(object):
         
                 if not out:
                     continue
-        
+                
                 self.m_stream.send(b''.join(out))
                 
                 del out[:]
@@ -316,7 +315,8 @@ class NetworkConnection(object):
                 #    logger.debug('send %s bytes', encoder.size())
         except IOError as e:
             # connection died probably
-            logger.debug("IOError in write thread: %s", e)
+            if not isinstance(e, StreamEOF):
+                logger.debug("IOError in write thread: %s", e)
         except Exception:
             logger.warn("Unhandled exception in write thread", exc_info=True)
             

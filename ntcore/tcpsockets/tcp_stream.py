@@ -19,9 +19,6 @@ class TCPStream(object):
         
         self.close_lock = threading.Lock()
     
-    #def __del__(self):
-    #    self.close()    
-    
     def read(self, size):
         
         # TODO: ntcore does a select to wait for read to be available. Necessary?

@@ -132,10 +132,6 @@ class Storage(object):
             kRpcResponse:   self._processRpcResponse
         }
     
-    
-    #def __del__(self):
-    #    self.stop()
-    
     def stop(self):
         self.m_terminating = True
         with self.m_rpc_results_cond:
@@ -151,7 +147,7 @@ class Storage(object):
     
     def getEntryType(self, msg_id):
         with self.m_mutex:
-            if msg_id >= len(self.m_idmap.size):
+            if msg_id >= len(self.m_idmap):
                 return NT_UNASSIGNED
         
             entry = self.m_idmap[msg_id]

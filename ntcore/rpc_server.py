@@ -42,9 +42,6 @@ class RpcServer(object):
         self.m_on_exit = None
         
         self.m_call_queue = Queue()
-        
-    #def __del__(self):
-    #    self.stop()
 
     def setOnStart(self, on_start):
         self.m_on_start = on_start
