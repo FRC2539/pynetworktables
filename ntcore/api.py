@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS c0ce427 src/ntcore_cpp.cpp
 
 from .dispatcher import Dispatcher
 from .notifier import Notifier
@@ -27,7 +28,7 @@ class NtCoreApi(object):
         self.rpc_server.stop()
         self.notifier.stop()
         self.storage.stop()
-    
+
     #
     # Table functions
     #
@@ -83,14 +84,12 @@ class NtCoreApi(object):
         self.notifier.removeEntryListener(entry_listener_uid)
     
     def addConnectionListener(self, callback, immediate_notify):
-        uid = self.notifier.addConnectionListener(callback)
+        self.notifier.addConnectionListener(callback)
         if immediate_notify:
             self.dispatcher.notifyConnections(callback)
     
-        return uid
-    
-    def removeConnectionListener(self, conn_listener_uid):
-        self.notifier.removeConnectionListener(conn_listener_uid)
+    def removeConnectionListener(self, callback):
+        self.notifier.removeConnectionListener(callback)
 
     
     #
@@ -104,7 +103,7 @@ class NtCoreApi(object):
     #
     
     #
-    # Client/Server functions
+    # Initialization functions
     #
         
     def setNetworkIdentity(self, name):
@@ -129,7 +128,10 @@ class NtCoreApi(object):
         raise Exception("TODO")
     
     def getIsConnected(self):
-        raise Exception("TODO")
+        return self.dispatcher.isConnected()
+    
+    def setVerboseLogging(self, verbose):
+        self.dispatcher.setVerboseLogging(verbose)
     
     #
     # Persistence

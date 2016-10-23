@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS a73166a src/Value.cpp
 '''
     Internal storage for ntcore values
     

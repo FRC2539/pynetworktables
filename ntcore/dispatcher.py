@@ -1,3 +1,4 @@
+# validated: 2016-10-22 DS 1d33699 src/Dispatcher.cpp
 '''----------------------------------------------------------------------------'''
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
@@ -49,7 +50,11 @@ class Dispatcher(object):
         # Mutex for user-accessible items
         self.m_user_mutex = threading.RLock()
         self.m_connections = []
-        self.m_identity = ""
+        
+        # Circular dependency problem
+        
+        from networktables import __version__
+        self.m_identity = "pynetworktables %s" % __version__ 
         
         self.m_active = False # set to false to terminate threads
         self.m_update_rate = 0.050 # periodic dispatch rate, in s
@@ -62,6 +67,9 @@ class Dispatcher(object):
         self.m_reconnect_cv = Condition(self.m_user_mutex)
         self.m_reconnect_proto_rev = 0x0300
         self.m_do_reconnect = True
+    
+    def setVerboseLogging(self, verbose):
+        self.m_verbose = verbose
     
     def startServer(self, persist_filename, listen_address, port):
         acceptor = TcpAcceptor(port, listen_address)
@@ -91,8 +99,10 @@ class Dispatcher(object):
         self.m_storage.setOutgoing(self._queueOutgoing,
                                    self.m_server)
     
-        self.m_dispatch_thread = threading.Thread(target=self._dispatchThreadMain, name='nt-dispatch-thread') 
-        self.m_clientserver_thread = threading.Thread(target=self._serverThreadMain, name='nt-server-thread')
+        self.m_dispatch_thread = threading.Thread(target=self._dispatchThreadMain,
+                                                  name='nt-dispatch-thread') 
+        self.m_clientserver_thread = threading.Thread(target=self._serverThreadMain,
+                                                      name='nt-server-thread')
         
         self.m_dispatch_thread.daemon = True
         self.m_clientserver_thread.daemon = True
@@ -115,8 +125,13 @@ class Dispatcher(object):
         self.m_storage.setOutgoing(self._queueOutgoing,
                                    self.m_server)
     
-        self.m_dispatch_thread = threading.Thread(target=self._dispatchThreadMain, name='nt-dispatch-thread') 
-        self.m_clientserver_thread = threading.Thread(target=self._clientThreadMain, name='nt-client-thread')
+        self.m_dispatch_thread = threading.Thread(target=self._dispatchThreadMain,
+                                                  name='nt-dispatch-thread') 
+        self.m_clientserver_thread = threading.Thread(target=self._clientThreadMain,
+                                                      name='nt-client-thread')
+        
+        self.m_dispatch_thread.daemon = True
+        self.m_clientserver_thread.daemon = True
         
         self.m_dispatch_thread.start()
         self.m_clientserver_thread.start()
@@ -205,13 +220,18 @@ class Dispatcher(object):
         
         return conns
     
+    def isConnected(self):
+        if self.m_active:
+            with self.m_user_mutex:
+                for conn in self.m_connections:
+                    if conn.is_connected():
+                        return True
+        return False
+    
     def notifyConnections(self, callback):
         with self.m_user_mutex:
             for conn in self.m_connections:
-                if conn.state() != NetworkConnection.State.kActive:
-                    continue
-    
-                self.m_notifier.notifyConnection(True, conn.info(), callback)
+                conn.notifyIfActive(callback)
     
     def _dispatchWaitFor(self):
         return not self.m_active or self.m_do_flush
@@ -223,6 +243,8 @@ class Dispatcher(object):
         next_save_time = timeout_time + save_delta_time
     
         count = 0
+        is_server = self.m_server
+        verbose = self.m_verbose
         
         while self.m_active:
             # handle loop taking too long
@@ -241,7 +263,7 @@ class Dispatcher(object):
                 break    
             
             # perform periodic persistent save
-            if self.m_server and self.m_persist_filename and start > next_save_time:
+            if is_server and self.m_persist_filename and start > next_save_time:
                 next_save_time += save_delta_time
                 # handle loop taking too long
                 if start > next_save_time:
@@ -254,7 +276,7 @@ class Dispatcher(object):
             with self.m_user_mutex:
                 reconnect = False
     
-                if self.m_verbose:
+                if verbose:
                     count += 1
                     if count > 10:
                         logger.debug("dispatch running %s connections",
@@ -266,10 +288,10 @@ class Dispatcher(object):
                     # only send keep-alives on client
                     state = conn.state()
                     if state == NetworkConnection.State.kActive:
-                        conn.postOutgoing(not self.m_server)
+                        conn.postOutgoing(not is_server)
                     
                     # if client, if connection died
-                    if not self.m_server and state == NetworkConnection.State.kDead:
+                    if not is_server and state == NetworkConnection.State.kDead:
                         reconnect = True
                 
                 # reconnect if we disconnected (and a reconnect is not in progress)
@@ -428,6 +450,8 @@ class Dispatcher(object):
         
         # receive initial assignments
         incoming = []
+        verbose = self.m_verbose
+        
         while True:
             if not msg:
                 # disconnected, retry
@@ -443,7 +467,7 @@ class Dispatcher(object):
                              msg.type)
                 return False
             
-            if self.m_verbose:
+            if verbose:
                 logger.debug("received assign str=%s id=%s seq_num=%s",
                              msg.str, msg.id, msg.seq_num_uid)
     
@@ -468,6 +492,9 @@ class Dispatcher(object):
         return True
     
     def _serverHandshake(self, conn, get_msg, send_msgs):
+        
+        verbose = self.m_verbose
+        
         # Wait for the client to send us a hello.
         msg = get_msg()
         if not msg:
@@ -507,7 +534,7 @@ class Dispatcher(object):
         outgoing.append(Message.serverHelloDone())
     
         # Batch transmit
-        if self.m_verbose:
+        if verbose:
             logger.debug("server: sending initial assignments")
         
         send_msgs(outgoing)
@@ -538,7 +565,7 @@ class Dispatcher(object):
                                  msg.type)
                     return False
                 
-                if self.m_verbose:
+                if verbose:
                     logger.debug("received assign str=%s id=%s seq_num=%s",
                                  msg.str, msg.id, msg.seq_num_uid)
     

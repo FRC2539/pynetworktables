@@ -1,3 +1,4 @@
+# novalidate
 
 from collections import namedtuple
 

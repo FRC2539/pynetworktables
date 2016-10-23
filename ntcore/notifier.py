@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS a73166a src/Notifier.cpp src/Notifier.h
 '''----------------------------------------------------------------------------'''
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
@@ -73,7 +74,7 @@ class Notifier(object):
         self.m_local_notifiers = False
         
         self.m_entry_listeners = UidVector()
-        self.m_conn_listeners = UidVector()
+        self.m_conn_listeners = set()
         
         # In python we don't need multiple queues
         self.m_notifications = Queue()
@@ -161,10 +162,10 @@ class Notifier(object):
                         continue
                     
                     # Use copy because iterator might get invalidated.
-                    for listener in list(self.m_conn_listeners.values()):
+                    for listener in list(self.m_conn_listeners):
                         try:
                             # ntcore difference: no uid in callback
-                            listener.callback(item.connected, item.conn_info)
+                            listener(item.connected, item.conn_info)
                         except Exception:
                             logger.warn("Unhandled exception processing notify callback", exc_info=True)
         
@@ -206,11 +207,11 @@ class Notifier(object):
     
     def addConnectionListener(self, callback):
         self.start()
-        return self.m_conn_listeners.add(callback)
+        self.m_conn_listeners.add(callback)
     
-    def removeConnectionListener(self, conn_listener_uid):
+    def removeConnectionListener(self, callback):
         try:
-            del self.m_conn_listeners[conn_listener_uid]
+            self.m_conn_listeners.remove(callback)
         except KeyError:
             pass
     

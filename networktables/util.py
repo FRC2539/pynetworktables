@@ -91,7 +91,7 @@ class ChooserControl(object):
             Returns the current choices. If the chooser doesn't exist, this
             will return an empty tuple.
         
-            :rtype: :class:`.StringArray`
+            :rtype: tuple
         '''
         return self.subtable.getStringArray('options', ())
     

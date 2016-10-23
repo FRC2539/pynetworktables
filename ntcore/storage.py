@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS e952236 src/Storage.cpp src/Storage.h
 '''----------------------------------------------------------------------------'''
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
@@ -253,7 +254,7 @@ class Storage(object):
 
                 # if the received flags don't match what we sent, most likely
                 # updated flags locally in the interim; send flags update message.
-                if msg.flags != entry.flags and outgoing:
+                if msg.flags != entry.flags and outgoing is not None:
                     outmsg = Message.flagsUpdate(msg_id, entry.flags)
                     outgoing.append((outmsg, None, None))
 
@@ -263,9 +264,9 @@ class Storage(object):
         # already exists; ignore if sequence number not higher than local
         seq_num = msg.seq_num_uid
         if entry.isSeqNewerThan(seq_num):
-            if may_need_update and outgoing:
+            if may_need_update and outgoing is not None:
                 outmsg = Message.entryUpdate(entry.id, entry.seq_num,
-                                                   entry.value)
+                                             entry.value)
                 outgoing.append((outmsg, None, None))
             
             return
@@ -304,7 +305,7 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and outgoing:
+        if self.m_server and outgoing is not None:
             outmsg = Message.entryAssign(entry.name, msg_id, msg.seq_num_uid,
                                          msg.value, entry.flags)
             outgoing.append((outmsg, None, conn))
@@ -323,8 +324,7 @@ class Storage(object):
         seq_num = msg.seq_num_uid
         if entry.isSeqNewerThan(seq_num):
             return
-
-
+        
         # update local
         entry.value = msg.value
         entry.seq_num = seq_num
@@ -332,14 +332,13 @@ class Storage(object):
         # update persistent dirty flag if it's a persistent value
         if entry.isPersistent():
             self.m_persistent_dirty = True
-
-
+        
         # notify
         self.m_notifier.notifyEntry(entry.name, entry.value, NT_NOTIFY_UPDATE)
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and outgoing:
+        if self.m_server and outgoing is not None:
             outgoing.append((msg, None, conn))
     
     def _processFlagsUpdate(self, msg, conn, outgoing):
@@ -370,7 +369,7 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and outgoing:
+        if self.m_server and outgoing is not None:
             outgoing.append((msg, None, conn))
     
     def _processEntryDelete(self, msg, conn, outgoing):
@@ -402,7 +401,7 @@ class Storage(object):
         
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and outgoing:
+        if self.m_server and outgoing is not None:
             outgoing.append((msg, None, conn))
     
     def _processClearEntries(self, msg, conn, outgoing):
@@ -411,7 +410,7 @@ class Storage(object):
 
         # broadcast to all other connections (note for client there won't
         # be any other connections, don't bother)
-        if self.m_server and outgoing:
+        if self.m_server and outgoing is not None:
             outgoing.append((msg, None, conn))
     
     def _processExecuteRpc(self, msg, conn, outgoing):

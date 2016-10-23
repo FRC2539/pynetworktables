@@ -1,3 +1,4 @@
+# novalidate
 
 import threading
 import socket

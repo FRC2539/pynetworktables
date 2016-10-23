@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS a73166a src/WireDecoder.cpp src/WireDecoder.h src/WireEncoder.cpp src/WireEncoder.h  
 '''
     This encompasses the WireEncoder and WireDecoder stuff in ntcore
     

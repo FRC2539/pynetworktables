@@ -1,4 +1,5 @@
 
+from .networktables import NetworkTables
 
 class AutoUpdateValue:
     """Holds a value from NetworkTables, and changes it as new entries
@@ -56,7 +57,7 @@ class AutoUpdateListener:
         
     def init(self):
         if not self.hasListener:
-            NetworkTable.addGlobalListener(self._valueChanged, False)
+            NetworkTables.addGlobalListener(self._valueChanged, False)
             self.hasListener = True
         
     def createAutoValue(self, key, default):

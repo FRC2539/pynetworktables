@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS e952236 src/Storage.cpp src/Storage.h
 '''
     This tries to stay compatible with ntcore's persistence mechanism,
     but if you go outside the realm of normal operations it may differ.

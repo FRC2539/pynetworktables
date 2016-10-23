@@ -1,26 +1,5 @@
 
 
-class NetworkTableConnectionListenerAdapter:
-    """An adapter that changes the source of a connection event
-    """
-
-    def __init__(self, targetSource, targetListener):
-        """
-        :param targetSource: the source where the event will appear to come
-                             from
-        :param targetListener: the listener where events will be forwarded
-        """
-        self.targetSource = targetSource
-        self.targetListener = targetListener
-        
-        assert callable(self.targetListener.connected)
-        assert callable(self.targetListener.disconnected)
-    
-    def connected(self, remote):
-        self.targetListener.connected(self.targetSource)
-
-    def disconnected(self, remote):
-        self.targetListener.disconnected(self.targetSource)
 
 class NetworkTableGlobalListenerAdapter:
 

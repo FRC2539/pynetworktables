@@ -81,7 +81,7 @@ class NetworkTables:
                            cls.initialize()
         
         .. versionadded:: 2017.0.0
-           The *server* parameter
+           The *server* and *verbose* parameters
         """
         
         with cls._staticMutex:
@@ -309,6 +309,20 @@ class NetworkTables:
         with cls._staticMutex:
             cls._checkInit()
             cls._mode = 'test'
+            
+    @classmethod
+    def enableVerboseLogging(cls):
+        """Enable verbose logging that can be useful when trying to diagnose
+        NetworkTables issues.
+        
+        .. warn:: Don't enable this in normal use, as it can potentially 
+                  cause performance issues due to the volume of logging.
+                  
+        .. versionadded:: 2017.0.0
+        """
+        with cls._staticMutex:
+            cls._checkInit()
+            cls._api.setVerboseLogging(True)
     
     @classmethod
     def getTable(cls, key):
@@ -350,18 +364,16 @@ class NetworkTables:
         This will automatically initialize network tables if it has not been
         already.
 
-        .. warning:: Generally, you should not use this object. Prefer to use
-                     :meth:`getTable` instead and do operations on individual
-                     NetworkTables.
-
+        .. note:: This is now an alias for ``NetworkTables.getTable('')``
+        
         .. versionadded:: 2015.2.0
+        .. versionchanged:: 2017.0.0
+           Returns a NetworkTable instance
 
-        :rtype: :class:`.NetworkTableNode`
+        :rtype: :class:`.NetworkTable`
         """
-        with cls._staticMutex:
-            if cls._staticProvider is None:
-                cls.initialize()
-            return cls._staticProvider.getNode()
+        return cls.getTable('')
+        
 
     @classmethod
     def addGlobalListener(cls, listener, immediateNotify=True):
@@ -446,7 +458,10 @@ class NetworkTables:
 
     @classmethod
     def isConnected(cls):
-        """:returns: True if connected to a remote NetworkTables instance"""
+        """
+            :returns: True if connected to at least one other NetworkTables
+                      instance
+        """
         return cls._api.getIsConnected()
 
     @classmethod
@@ -459,32 +474,29 @@ class NetworkTables:
         '''Adds a listener that will be notified when a new connection to a 
         NetworkTables client/server is established.
         
-        The listener is called from the NetworkTables I/O thread, and should
+        The listener is called from a NetworkTables owned thread and should
         return as quickly as possible.
         
-        :param listener: An object that has a 'connected' function and a
-                         'disconnected' function. Each function will be called
-                         with this NetworkTable object as the first parameter
+        :param listener: A function that will be called with two parameters
+        :type listener: fn(bool, ConnectionInfo)
+        
         :param immediateNotify: If True, the listener will be called immediately
-                                with the current values of the table
+                                with any active connection information
         
         .. warning:: You may call the NetworkTables API from within the
                      listener, but it is not recommended.
+                     
+        .. versionchanged:: 2017.0.0
+           The listener is now a function
         '''
-        adapter = cls.connectionListenerMap.get(listener)
-        if adapter is not None:
-            raise ValueError("Cannot add the same listener twice")
-        adapter = NetworkTableConnectionListenerAdapter(self, listener)
-        cls.connectionListenerMap[listener] = adapter
-        cls.node.addConnectionListener(adapter, immediateNotify)
+        assert callable(listener)
+        cls._api.addConnectionListener(listener, immediateNotify)
 
     @classmethod
     def removeConnectionListener(cls, listener):
         '''Removes a connection listener
         
-        :param listener: The object registered for connection notifications
+        :param listener: The function registered for connection notifications
         '''
-        adapter = cls._connectionListenerMap.get(listener)
-        if adapter is not None:
-            cls.node.removeConnectionListener(adapter)
-            del cls._connectionListenerMap[listener]
+        cls._api.removeConnectionListener(listener)
+

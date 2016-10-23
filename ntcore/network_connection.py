@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS a73166a src/NetworkConnection.cpp src/NetworkConnection.h
 '''----------------------------------------------------------------------------'''
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
@@ -162,6 +163,9 @@ class NetworkConnection(object):
         return ConnectionInfo(self.remote_id(), self.m_stream.getPeerIP(),
                               self.m_stream.getPeerPort(),
                               self.m_last_update, self.m_proto_rev)
+        
+    def is_connected(self):
+        return self.m_state == self.State.kActive
     
     def last_update(self):
         return self.m_last_update
@@ -237,7 +241,7 @@ class NetworkConnection(object):
                         msg = Message.read(self.m_stream, decoder, self.m_get_entry_type)
                     except Exception as e:
                         if not isinstance(e, StreamEOF):
-                            if self.m_verbose:
+                            if verbose:
                                 logger.exception("read error")
                             else:
                                 logger.warn("read error: %s", e)

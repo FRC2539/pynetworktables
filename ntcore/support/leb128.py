@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS a73166a wpiutil/src/support/leb128.cpp
 '''
     Operations related to LEB128 encoding/decoding
 

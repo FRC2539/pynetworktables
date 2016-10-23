@@ -1,3 +1,4 @@
+# validated: 2016-10-21 DS e952236 src/RpcServer.cpp src/RpcServer.h
 '''----------------------------------------------------------------------------'''
 ''' Copyright (c) FIRST 2015. All Rights Reserved.                             '''
 ''' Open Source Software - may be modified and shared by FRC teams. The code   '''
@@ -53,6 +54,7 @@ class RpcServer(object):
         if not self.m_call_thread:
             self.m_call_thread = threading.Thread(target=self._callThread,
                                                   name='nt-rpc-thread')
+            self.m_call_thread.daemon = True
             self.m_call_thread.start()
              
     def stop(self):
