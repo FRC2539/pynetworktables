@@ -88,6 +88,7 @@ class NetworkTable:
         #: Path of table without trailing slash
         self.path = path
         self._path = path + self.PATH_SEPARATOR
+        self._pathsz = len(self._path)
             
         self._api = api
         
@@ -99,6 +100,14 @@ class NetworkTable:
     def __repr__(self):
         return "<NetworkTable path=%s>" % self.path
     
+    def _on_value_changed(self, key, value, flags):
+        key = key[self._pathsz:]
+        if '/' in key:
+            return
+        
+        # for each table listener
+        
+        # specific key listener
 
     def addTableListener(self, listener, immediateNotify=False, key=None):
         '''Adds a listener that will be notified when any key in this
@@ -677,9 +686,9 @@ class NetworkTable:
         '''Returns an object that will be automatically updated when the
         value is updated by networktables.
         
-        .. note:: Does not work with complex types. If you modify the
-                  returned type, the value will NOT be written back to
-                  NetworkTables.
+        .. note:: If you modify the returned value, the value will NOT
+                  be written back to NetworkTables. See :func:`.ntproperty`
+                  if you're looking for that sort of thing.
         
         :param key: the key name
         :type  key: str
