@@ -5,17 +5,6 @@
 
 import pytest
 
-from networktables import NetworkTables
-
-@pytest.fixture(scope='function')
-def nt():
-    NetworkTables.setTestMode()
-    NetworkTables.initialize()
-    
-    yield NetworkTables
-    
-    NetworkTables.shutdown()
-
 @pytest.fixture(scope='function')
 def table1(nt):
     return nt.getTable('/test1')

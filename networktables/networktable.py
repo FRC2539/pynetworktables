@@ -15,10 +15,23 @@ from ntcore.constants import (
     NT_DOUBLE_ARRAY,
     NT_STRING_ARRAY,
     
-    NT_PERSISTENT
+    NT_PERSISTENT,
+    
+    NT_NOTIFY_IMMEDIATE,
+    NT_NOTIFY_LOCAL,
+    NT_NOTIFY_NEW,
+    NT_NOTIFY_DELETE,
+    NT_NOTIFY_UPDATE,
+    NT_NOTIFY_FLAGS
 )
 
+_is_new = NT_NOTIFY_IMMEDIATE | NT_NOTIFY_NEW
+
 from ntcore.value import Value
+
+import logging
+logger = logging.getLogger('nt')
+
 
 class _defaultValueSentry:
     pass
@@ -92,66 +105,131 @@ class NetworkTable:
             
         self._api = api
         
-        self.listenerMap = {}
+        self._listeners = {}
 
     def __str__(self):
         return "NetworkTable: "+self.path
     
     def __repr__(self):
         return "<NetworkTable path=%s>" % self.path
-    
-    def _on_value_changed(self, key, value, flags):
-        key = key[self._pathsz:]
-        if '/' in key:
-            return
-        
-        # for each table listener
-        
-        # specific key listener
 
-    def addTableListener(self, listener, immediateNotify=False, key=None):
+    def addTableListener(self, listener, immediateNotify=False, key=None,
+                               localNotify=False):
         '''Adds a listener that will be notified when any key in this
         NetworkTable is changed, or when a specified key changes.
         
         The listener is called from the NetworkTables I/O thread, and should
         return as quickly as possible.
         
-        :param listener: A callable that has this signature: `callable(source, key, value, isNew)`
+        :param listener: A callable with signature `callable(source, key, value, isNew)`
         :param immediateNotify: If True, the listener will be called immediately with the current values of the table
         :param key: If specified, the listener will only be called when this key is changed
-        
+        :param localNotify: True if you wish to be notified of changes made locally
         
         .. warning:: You may call the NetworkTables API from within the
-                     listener, but it is not recommended as we are not
-                     currently sure if deadlocks will occur
+                     listener, but it is not recommended
+                     
+        ..versionchanged:: 2017.0.0
+          localNotify parameter added
+        
         '''
-        adapters = self.listenerMap.setdefault(listener, [])
-        if key is not None:
-            adapter = NetworkTableKeyListenerAdapter(
-                    key, self._path + key, self, listener)
+        flags = NT_NOTIFY_NEW | NT_NOTIFY_UPDATE
+        if immediateNotify:
+            flags |= NT_NOTIFY_IMMEDIATE
+        if localNotify:
+            flags |= NT_NOTIFY_LOCAL
+            
+        self.addTableListenerEx(listener, flags, key=key)
+        
+    def addTableListenerEx(self, listener, flags, key=None,
+                           paramIsNew=True):
+        '''Adds a listener that will be notified when any key in this
+        NetworkTable is changed, or when a specified key changes.
+        
+        The listener is called from the NetworkTables I/O thread, and should
+        return as quickly as possible.
+        
+        :param listener: A callable with signature `callable(source, key, value, param)`
+        :param flags: Specify raw `ntcore.constants.NT_NOTIFY_*` flags here
+        :param key: If specified, the listener will only be called when this key is changed
+        :param paramIsNew: If True, the listener fourth parameter is a boolean set to True
+                           if the listener is being called because of a new value in the
+                           table. Otherwise, the parameter is an integer of the raw
+                           `NT_NOTIFY_*` flags 
+        
+        .. warning:: You may call the NetworkTables API from within the
+                     listener, but it is not recommended
+        
+        .. versionadded:: 2017.0.0
+        '''
+        
+        if key is None:
+            _pathsz = self._pathsz
+            if paramIsNew:
+                def callback(key_, value_, flags_):
+                    key_ = key_[_pathsz:]
+                    if '/' not in key_:
+                        listener(self, key_, value_, (flags_ & _is_new) != 0)
+            else:
+                def callback(key_, value_, flags_):
+                    key_ = key_[_pathsz:]
+                    if '/' not in key_:
+                        listener(self, key_, value_, flags_)
         else:
-            adapter = NetworkTableListenerAdapter(
-                    self._path+self.PATH_SEPARATOR, self, listener)
-        adapters.append(adapter)
-        self.node.addTableListener(adapter, immediateNotify)
+            path = self._path + key
+            if paramIsNew:
+                def callback(key_, value_, flags_):
+                    if path == key_:
+                        listener(self, key, value_, (flags_ & _is_new) != 0)
+            else:
+                def callback(key_, value_, flags_):
+                    if path == key_:
+                        listener(self, key, value_, flags_)
+        
+        uid = self._api.addEntryListener(self._path, callback, flags)
+        self._listeners.setdefault(listener, []).append(uid)
 
-    def addSubTableListener(self, listener):
+    def addSubTableListener(self, listener, localNotify=False):
         '''Adds a listener that will be notified when any key in a subtable of
         this NetworkTable is changed.
         
         The listener is called from the NetworkTables I/O thread, and should
         return as quickly as possible.
         
-        :param listener: A callable that has this signature: `callable(source, key, value, isNew)`
+        :param listener: Callable to call when previously unseen table appears
+        :type listener: `callable(source, key, subtable, True)`
+        :param localNotify: True if you wish to be notified when local changes
+                            result in a new table
         
         .. warning:: You may call the NetworkTables API from within the
                      listener, but it is not recommended as we are not
                      currently sure if deadlocks will occur
+                     
+        .. versionchanged:: 2017.0.0
+           - Added localNotify parameter
         '''
-        adapters = self.listenerMap.setdefault(listener, [])
-        adapter = NetworkTableSubListenerAdapter(self._path, self, listener)
-        adapters.append(adapter)
-        self.node.addTableListener(adapter, True)
+        notified_tables = {}
+        
+        def _callback(key, value, _):
+            print("stcall")
+            key = key[self._pathsz:]
+            if '/' in key:
+                skey = key[:key.index('/')]
+                
+                o = object()
+                if notified_tables.setdefault(skey, o) is o:
+                    try:
+                        listener(self, skey, self.getSubTable(skey), True)
+                    except Exception:
+                        logger.warning("Unhandled exception in %s", listener, exc_info=True)
+        
+        flags = NT_NOTIFY_NEW | NT_NOTIFY_IMMEDIATE
+        if localNotify:
+            flags |= NT_NOTIFY_LOCAL
+        
+        uid = self._api.addEntryListener(self._path, _callback, flags)
+        self._listeners.setdefault(listener, []).append(uid)
+        
 
     def removeTableListener(self, listener):
         '''Removes a table listener
@@ -159,11 +237,9 @@ class NetworkTable:
         :param listener: callable that was passed to :meth:`addTableListener`
                          or :meth:`addSubTableListener`
         '''
-        adapters = self.listenerMap.get(listener)
-        if adapters is not None:
-            for adapter in adapters:
-                self.node.removeTableListener(adapter)
-            del adapters[:]
+        uids = self._listeners.pop(listener, [])
+        for uid in uids:
+            self._api.removeTableListener(uid)
 
     def getSubTable(self, key):
         """Returns the table at the specified key. If there is no table at the

@@ -823,10 +823,11 @@ class Storage(object):
     
     def notifyEntries(self, prefix, only):
         with self.m_mutex:
+            
             for k, entry in self.m_entries.items():
                 if not k.startswith(prefix):
                     continue
-        
+                
                 self.m_notifier.notifyEntry(k, entry.value, NT_NOTIFY_IMMEDIATE,
                                             only)
     

@@ -309,6 +309,7 @@ class NetworkTables:
         with cls._staticMutex:
             cls._checkInit()
             cls._mode = 'test'
+            cls.enableVerboseLogging()
             
     @classmethod
     def enableVerboseLogging(cls):

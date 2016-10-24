@@ -55,7 +55,7 @@ class UidVector(dict):
     def add(self, item):
         with self.lock:
             idx = self.idx
-            idx += 1
+            self.idx += 1
         
         self[idx] = item
         return idx
@@ -66,8 +66,10 @@ _assign_both = NT_NOTIFY_UPDATE | NT_NOTIFY_FLAGS
 
 class Notifier(object):
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         self.m_mutex = threading.Lock()
+        
+        self.m_verbose = verbose
         
         self.m_active = False
         self.m_owner = None
@@ -81,6 +83,9 @@ class Notifier(object):
         
         self.m_on_start = None
         self.m_on_exit = None
+        
+    def setVerboseLogging(self, verbose):
+        self.m_verbose = verbose
     
     def start(self):
         if not self.m_owner:
@@ -113,11 +118,15 @@ class Notifier(object):
         
                     if not item.value:
                         continue
+                    
+                    item_name = item.name
+                    item_value = item.value.value
+                    item_flags = item.flags
         
                     if item.only:
                         try:
                             # ntcore difference: no uid in callback
-                            item.only(item.name, item.value, item.flags)
+                            item.only(item_name, item_value, item_flags)
                         except Exception:
                             logger.warn("Unhandled exception processing notify callback", exc_info=True)
                         continue
@@ -129,8 +138,7 @@ class Notifier(object):
                         # Because assign messages can result in both a value and flags update,
                         # we handle that case specially.
                         listen_flags = listener.flags
-                        flags = item.flags
-                        name = item.name
+                        flags = item_flags
                         
                         if (flags & _assign_both) == _assign_both:
                             if (listen_flags & _assign_both) == 0:
@@ -143,12 +151,12 @@ class Notifier(object):
                             continue
                         
                         # must match prefix
-                        if not name.startswith(listener.prefix):
+                        if not item_name.startswith(listener.prefix):
                             continue
                         
                         try:
                             # ntcore difference: no uid in callback
-                            listener.callback(item.name, item.value, item.flags)
+                            listener.callback(item_name, item_value, item_flags)
                         except Exception:
                             logger.warn("Unhandled exception processing notify callback", exc_info=True)
                 
@@ -181,6 +189,9 @@ class Notifier(object):
     
     
     def addEntryListener(self, prefix, callback, flags):
+        if self.m_verbose:
+            logger.debug("%s entry listeners active", len(self.m_entry_listeners) + 1)
+        
         self.start()
         if (flags & NT_NOTIFY_LOCAL) != 0:
             self.m_local_notifiers = True
@@ -201,11 +212,14 @@ class Notifier(object):
     
         if not self.m_owner:
             return
-    
+        
         self.m_notifications.put(_EntryNotification(True, name, value, flags, only))
     
     
     def addConnectionListener(self, callback):
+        if self.m_verbose:
+            logger.debug("%s connection listeners active", len(self.m_conn_listeners) + 1)
+        
         self.start()
         self.m_conn_listeners.add(callback)
     

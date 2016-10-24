@@ -725,11 +725,11 @@ def test_LoadPersistentBadHeader(storage_empty, outgoing):
     
     #EXPECT_CALL(warn, Warn(1, llvm.StringRef("header line mismatch, rest of file")))
     fp = StringIO("")
-    assert storage.loadPersistent(fp=fp) is not True
+    assert storage.loadPersistent(fp=fp) is not None
 
     fp = StringIO("[NetworkTables")
     #EXPECT_CALL(warn, Warn(1, llvm.StringRef("header line mismatch, rest of file")))
-    assert storage.loadPersistent(fp=fp) is not True
+    assert storage.loadPersistent(fp=fp) is not None
     assert len(storage.m_entries) == 0
     assert len(storage.m_idmap) == 0
     assert len(outgoing) == 0
@@ -739,7 +739,7 @@ def test_LoadPersistentCommentHeader(storage_empty, outgoing):
     storage = storage_empty
     
     fp = StringIO("\n; comment\n# comment\n[NetworkTables Storage 3.0]\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     assert len(storage.m_entries) == 0
     assert len(storage.m_idmap) == 0
     assert len(outgoing) == 0
@@ -749,7 +749,7 @@ def test_LoadPersistentEmptyName(storage_empty, outgoing):
     storage = storage_empty
     
     fp = StringIO("[NetworkTables Storage 3.0]\nboolean \"\"=true\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     assert len(storage.m_entries) == 0
     assert len(storage.m_idmap) == 0
     assert len(outgoing) == 0
@@ -759,7 +759,7 @@ def test_LoadPersistentAssign(storage_empty, outgoing, is_server):
     storage = storage_empty
 
     fp = StringIO("[NetworkTables Storage 3.0]\nboolean \"foo\"=true\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     
     entry = storage.m_entries.get("foo")
     assert Value.makeBoolean(True) == entry.value
@@ -786,7 +786,7 @@ def test_LoadPersistentUpdateFlags(storage_populated, outgoing, is_server):
     storage = storage_populated
     
     fp = StringIO("[NetworkTables Storage 3.0]\ndouble \"foo2\"=0.0\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     
     entry = storage.m_entries.get("foo2")
     assert Value.makeDouble(0.0) == entry.value
@@ -813,7 +813,7 @@ def test_LoadPersistentUpdateValue(storage_populated, outgoing, is_server):
     storage.m_entries.get("foo2").flags = NT_PERSISTENT
 
     fp = StringIO("[NetworkTables Storage 3.0]\ndouble \"foo2\"=1.0\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     
     entry = storage.m_entries.get("foo2")
     assert Value.makeDouble(1.0) == entry.value
@@ -840,7 +840,7 @@ def test_LoadPersistentUpdateValueFlags(storage_populated, outgoing, is_server):
     storage = storage_populated
     
     fp = StringIO("[NetworkTables Storage 3.0]\ndouble \"foo2\"=1.0\n")
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     
     entry = storage.m_entries.get("foo2")
     assert Value.makeDouble(1.0) == entry.value
@@ -897,7 +897,7 @@ def test_loadPersistent(storage_empty, outgoing):
     inp += "array string \"stringarr/two\"=\"hello\",\"world\\n\"\n"
 
     fp = StringIO(inp)
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
     
     assert 21 == len(storage.m_entries)
     assert 21 == len(outgoing)
@@ -932,7 +932,7 @@ def test_LoadPersistentWarn(storage_empty, outgoing):
     
     #EXPECT_CALL(warn,
     #            Warn(2, llvm.StringRef("unrecognized boolean value, not 'True' or 'False'")))
-    assert storage.loadPersistent(fp=fp) is True
+    assert storage.loadPersistent(fp=fp) is None
 
     assert len(storage.m_entries) == 0
     assert len(storage.m_idmap) == 0

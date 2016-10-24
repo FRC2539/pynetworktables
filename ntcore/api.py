@@ -18,7 +18,7 @@ class NtCoreApi(object):
     '''
     
     def __init__(self, verbose=False):
-        self.notifier = Notifier()
+        self.notifier = Notifier(verbose=verbose)
         self.rpc_server = RpcServer()
         self.storage = Storage(self.notifier, self.rpc_server)
         self.dispatcher = Dispatcher(self.storage, self.notifier, verbose=verbose)
@@ -132,6 +132,7 @@ class NtCoreApi(object):
     
     def setVerboseLogging(self, verbose):
         self.dispatcher.setVerboseLogging(verbose)
+        self.notifier.setVerboseLogging(verbose)
     
     #
     # Persistence
